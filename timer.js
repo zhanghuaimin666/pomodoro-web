@@ -1,0 +1,1258 @@
+﻿(() => {
+  const STUDY_MS = 35 * 60 * 1000;
+  const BREAK_MS = 5 * 60 * 1000;
+  const STORAGE_KEY = "pomodoro-35-5-state-v1";
+  const MONTH_LABELS = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
+  const EXTEND_CONFIG = {
+    study: { presets: [5, 10], maxCustom: 20, label: "学习" },
+    break: { presets: [2, 5, 10], maxCustom: 15, label: "休息" }
+  };
+
+  const els = {
+    modeLabel: document.getElementById("modeLabel"),
+    timeDisplay: document.getElementById("timeDisplay"),
+    pomodoroCount: document.getElementById("pomodoroCount"),
+    dailyFocus: document.getElementById("dailyFocus"),
+    calendarYear: document.getElementById("calendarYear"),
+    monthSelect: document.getElementById("monthSelect"),
+    viewModeSelect: document.getElementById("viewModeSelect"),
+    contributionGrid: document.getElementById("contributionGrid"),
+    startBtn: document.getElementById("startBtn"),
+    pauseBtn: document.getElementById("pauseBtn"),
+    resumeBtn: document.getElementById("resumeBtn"),
+    resetBtn: document.getElementById("resetBtn"),
+    extendPresetSelect: document.getElementById("extendPresetSelect"),
+    extendCustomMinutes: document.getElementById("extendCustomMinutes"),
+    applyExtendBtn: document.getElementById("applyExtendBtn"),
+    extendHint: document.getElementById("extendHint"),
+    todoInput: document.getElementById("todoInput"),
+    addTodoBtn: document.getElementById("addTodoBtn"),
+    clearDoneBtn: document.getElementById("clearDoneBtn"),
+    todoList: document.getElementById("todoList"),
+    reviewDate: document.getElementById("reviewDate"),
+    hourlyChart: document.getElementById("hourlyChart"),
+    interruptCount: document.getElementById("interruptCount"),
+    reviewTotalFocus: document.getElementById("reviewTotalFocus"),
+    reviewAdvice: document.getElementById("reviewAdvice"),
+    openReviewModalBtn: document.getElementById("openReviewModalBtn"),
+    reviewModal: document.getElementById("reviewModal"),
+    closeReviewModalBtn: document.getElementById("closeReviewModalBtn"),
+    modalReviewDate: document.getElementById("modalReviewDate"),
+    modalReviewSubtitle: document.getElementById("modalReviewSubtitle"),
+    reviewRange24Btn: document.getElementById("reviewRange24Btn"),
+    reviewRange7Btn: document.getElementById("reviewRange7Btn"),
+    modalHourlyChart: document.getElementById("modalHourlyChart"),
+    modalInterruptCount: document.getElementById("modalInterruptCount"),
+    modalReviewTotalFocus: document.getElementById("modalReviewTotalFocus"),
+    modalReviewAdvice: document.getElementById("modalReviewAdvice"),
+    autoNext: document.getElementById("autoNext"),
+    soundEnabled: document.getElementById("soundEnabled"),
+    ringtoneSelect: document.getElementById("ringtoneSelect"),
+    previewSoundBtn: document.getElementById("previewSoundBtn"),
+    themeSelect: document.getElementById("themeSelect"),
+    notifyBtn: document.getElementById("notifyBtn")
+  };
+
+  const state = {
+    mode: "study",
+    isRunning: false,
+    endTime: 0,
+    remainingMs: STUDY_MS,
+    completedPomodoros: 0,
+    dailyFocusMs: 0,
+    dailyDate: "",
+    focusHistory: {},
+    focusHourHistory: {},
+    dailyInterruptions: {},
+    todos: [],
+    selectedMonth: new Date().getMonth(),
+    viewMode: "detailed",
+    reviewRange: "24h",
+    autoNext: true,
+    soundEnabled: true,
+    ringtone: "classic",
+    theme: "blue"
+  };
+
+  let timerId = null;
+  let lastTickAt = null;
+  let activeAudioCtx = null;
+  let stopRingtoneTimer = null;
+  const quickExtendButtons = Array.from(document.querySelectorAll(".quick-extend-btn"));
+  let draggingTodoId = null;
+
+  function modeDuration(mode) {
+    return mode === "study" ? STUDY_MS : BREAK_MS;
+  }
+
+  function formatTime(ms) {
+    const total = Math.ceil(ms / 1000);
+    const m = String(Math.floor(total / 60)).padStart(2, "0");
+    const s = String(total % 60).padStart(2, "0");
+    return `${m}:${s}`;
+  }
+
+  function formatDuration(ms) {
+    const totalSeconds = Math.floor(ms / 1000);
+    const h = String(Math.floor(totalSeconds / 3600)).padStart(2, "0");
+    const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
+    const s = String(totalSeconds % 60).padStart(2, "0");
+    return `${h}:${m}:${s}`;
+  }
+
+  function todayKey(ts = Date.now()) {
+    const d = new Date(ts);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function parseHistory(raw) {
+    if (!raw || typeof raw !== "object") return {};
+    const result = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
+      const ms = Number(value);
+      if (!Number.isFinite(ms) || ms <= 0) continue;
+      result[key] = ms;
+    }
+    return result;
+  }
+
+  function parseHourHistory(raw) {
+    if (!raw || typeof raw !== "object") return {};
+    const result = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
+      if (!Array.isArray(value) || value.length !== 24) continue;
+      const row = value.map((n) => {
+        const ms = Number(n);
+        return Number.isFinite(ms) && ms > 0 ? ms : 0;
+      });
+      result[key] = row;
+    }
+    return result;
+  }
+
+  function parseInterruptions(raw) {
+    if (!raw || typeof raw !== "object") return {};
+    const result = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
+      const count = Math.max(0, Math.floor(Number(value) || 0));
+      if (count > 0) result[key] = count;
+    }
+    return result;
+  }
+
+  function pruneHistory() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const keepFrom = new Date(today);
+    keepFrom.setFullYear(today.getFullYear() - 2);
+
+    for (const key of Object.keys(state.focusHistory)) {
+      const [y, m, d] = key.split("-").map(Number);
+      const t = new Date(y, m - 1, d).getTime();
+      if (t < keepFrom.getTime()) {
+        delete state.focusHistory[key];
+      }
+    }
+    for (const key of Object.keys(state.focusHourHistory)) {
+      const [y, m, d] = key.split("-").map(Number);
+      const t = new Date(y, m - 1, d).getTime();
+      if (t < keepFrom.getTime()) {
+        delete state.focusHourHistory[key];
+      }
+    }
+    for (const key of Object.keys(state.dailyInterruptions)) {
+      const [y, m, d] = key.split("-").map(Number);
+      const t = new Date(y, m - 1, d).getTime();
+      if (t < keepFrom.getTime()) {
+        delete state.dailyInterruptions[key];
+      }
+    }
+  }
+
+  function ensureTodayBucket() {
+    const key = todayKey();
+    state.dailyDate = key;
+    if (!Number.isFinite(Number(state.focusHistory[key]))) {
+      state.focusHistory[key] = 0;
+    }
+    if (!Array.isArray(state.focusHourHistory[key]) || state.focusHourHistory[key].length !== 24) {
+      state.focusHourHistory[key] = Array(24).fill(0);
+    }
+    if (!Number.isFinite(Number(state.dailyInterruptions[key]))) {
+      state.dailyInterruptions[key] = 0;
+    }
+    state.dailyFocusMs = Math.max(0, Number(state.focusHistory[key]) || 0);
+  }
+
+  function addFocusToDay(key, ms) {
+    if (ms <= 0) return;
+    state.focusHistory[key] = (Number(state.focusHistory[key]) || 0) + ms;
+  }
+
+  function addFocusToHour(key, hour, ms) {
+    if (ms <= 0 || hour < 0 || hour > 23) return;
+    if (!Array.isArray(state.focusHourHistory[key]) || state.focusHourHistory[key].length !== 24) {
+      state.focusHourHistory[key] = Array(24).fill(0);
+    }
+    state.focusHourHistory[key][hour] = (Number(state.focusHourHistory[key][hour]) || 0) + ms;
+  }
+
+  function addFocusOverlap(fromMs, toMs) {
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) return;
+    let cursor = fromMs;
+    while (cursor < toMs) {
+      const d = new Date(cursor);
+      const nextHour = new Date(
+        d.getFullYear(),
+        d.getMonth(),
+        d.getDate(),
+        d.getHours() + 1,
+        0,
+        0,
+        0
+      ).getTime();
+      const chunkEnd = Math.min(nextHour, toMs);
+      const key = todayKey(cursor);
+      const duration = chunkEnd - cursor;
+      addFocusToDay(key, duration);
+      addFocusToHour(key, d.getHours(), duration);
+      cursor = chunkEnd;
+    }
+    ensureTodayBucket();
+  }
+
+  function dailyLevel(ms) {
+    if (ms < 60 * 60 * 1000) return "level-low";
+    if (ms < 180 * 60 * 1000) return "level-mid";
+    return "level-high";
+  }
+
+  function persist() {
+    pruneHistory();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, savedAt: Date.now() }));
+  }
+
+  function restore() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (!saved || typeof saved !== "object") return;
+
+      state.mode = saved.mode === "break" ? "break" : "study";
+      state.isRunning = Boolean(saved.isRunning);
+      state.endTime = Number(saved.endTime) || 0;
+      state.remainingMs = Number(saved.remainingMs) || modeDuration(state.mode);
+      state.completedPomodoros = Math.max(0, Number(saved.completedPomodoros) || 0);
+      state.focusHistory = parseHistory(saved.focusHistory);
+      state.focusHourHistory = parseHourHistory(saved.focusHourHistory);
+      state.dailyInterruptions = parseInterruptions(saved.dailyInterruptions);
+      state.todos = Array.isArray(saved.todos)
+        ? saved.todos
+          .filter((t) => t && typeof t.text === "string")
+          .map((t) => ({
+            id: Number.isFinite(Number(t.id)) ? Number(t.id) : Date.now() + Math.random(),
+            text: t.text.trim().slice(0, 80),
+            done: Boolean(t.done)
+          }))
+        : [];
+      state.dailyDate = typeof saved.dailyDate === "string" ? saved.dailyDate : todayKey();
+      const savedMonth = Number(saved.selectedMonth);
+      state.selectedMonth = Number.isInteger(savedMonth) && savedMonth >= 0 && savedMonth <= 11
+        ? savedMonth
+        : new Date().getMonth();
+      state.viewMode = saved.viewMode === "compact" ? "compact" : "detailed";
+      state.reviewRange = saved.reviewRange === "7d" ? "7d" : "24h";
+
+      const savedDailyFocusMs = Number(saved.dailyFocusMs);
+      const hasDailyFocus = Number.isFinite(savedDailyFocusMs) && savedDailyFocusMs > 0;
+      const hasHistory = Object.keys(state.focusHistory).length > 0;
+      if (!hasHistory) {
+        const fallbackMs = hasDailyFocus
+          ? savedDailyFocusMs
+          : state.completedPomodoros * STUDY_MS;
+        if (fallbackMs > 0) {
+          state.focusHistory[state.dailyDate] = fallbackMs;
+        }
+      }
+      if (!Object.keys(state.focusHourHistory).length) {
+        const key = state.dailyDate;
+        const arr = Array(24).fill(0);
+        const currentHour = new Date().getHours();
+        arr[currentHour] = Number(state.focusHistory[key]) || 0;
+        state.focusHourHistory[key] = arr;
+      }
+
+      state.autoNext = saved.autoNext !== false;
+      state.soundEnabled = saved.soundEnabled !== false;
+      const allowedRingtones = ["classic", "digital", "soft", "urgent"];
+      state.ringtone = allowedRingtones.includes(saved.ringtone) ? saved.ringtone : "classic";
+      if (saved.theme === "dark") {
+        state.theme = "dark";
+      } else if (saved.theme === "green") {
+        state.theme = "green";
+      } else {
+        state.theme = "blue";
+      }
+      ensureTodayBucket();
+
+      if (state.isRunning) {
+        const now = Date.now();
+        if (state.mode === "study") {
+          addFocusOverlap(Number(saved.savedAt) || now, now);
+        }
+        state.remainingMs = Math.max(0, state.endTime - now);
+        if (state.remainingMs === 0) {
+          state.isRunning = false;
+          handlePhaseComplete();
+        }
+      }
+    } catch {
+      // Ignore broken local data.
+    }
+  }
+
+  function updateTitle() {
+    document.title = `${formatTime(state.remainingMs)} ${state.mode === "study" ? "学习" : "休息"} | 番茄钟`;
+  }
+
+  function applyTheme() {
+    document.body.classList.toggle("theme-green", state.theme === "green");
+    document.body.classList.toggle("dark-theme", state.theme === "dark");
+  }
+
+  function heatLevel(ms, maxMs) {
+    if (ms <= 0 || maxMs <= 0) return 0;
+    const ratio = ms / maxMs;
+    if (ratio < 0.25) return 1;
+    if (ratio < 0.5) return 2;
+    if (ratio < 0.75) return 3;
+    return 4;
+  }
+
+  function renderContributionGrid() {
+    if (!els.contributionGrid) return;
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = state.selectedMonth;
+    const monthStart = new Date(year, month, 1);
+    const monthEnd = new Date(year, month + 1, 0);
+    const daysInMonth = monthEnd.getDate();
+
+    if (els.calendarYear) {
+      els.calendarYear.textContent = `${year}`;
+    }
+    if (els.monthSelect) {
+      els.monthSelect.value = String(month);
+    }
+    if (els.viewModeSelect) {
+      els.viewModeSelect.value = state.viewMode;
+    }
+
+    const calendarCard = els.contributionGrid.closest(".calendar-card");
+    if (calendarCard) {
+      calendarCard.classList.toggle("compact", state.viewMode === "compact");
+    }
+    const contentGrid = document.querySelector(".content-grid");
+    if (contentGrid) {
+      contentGrid.classList.toggle("compact-layout", state.viewMode === "compact");
+    }
+
+    const days = [];
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const d = new Date(year, month, day);
+      const key = todayKey(d.getTime());
+      days.push({ day, date: d, key, ms: Number(state.focusHistory[key]) || 0 });
+    }
+
+    const maxMs = days.reduce((max, item) => Math.max(max, item.ms), 0);
+    const leading = monthStart.getDay();
+    const cells = new Array(leading).fill(null).concat(days);
+    while (cells.length % 7 !== 0) {
+      cells.push(null);
+    }
+
+    els.contributionGrid.innerHTML = cells.map((item) => {
+      if (!item) {
+        return '<div class="calendar-day empty" aria-hidden="true"></div>';
+      }
+      const level = heatLevel(item.ms, maxMs);
+      const title = `${item.key} 专注 ${formatDuration(item.ms)}`;
+      if (state.viewMode === "compact") {
+        return `<div class="calendar-day compact lv-${level}" title="${title}" aria-label="${title}"></div>`;
+      }
+      return `<div class="calendar-day lv-${level}" title="${title}">${item.day}</div>`;
+    }).join("");
+  }
+
+  function render() {
+    ensureTodayBucket();
+    applyTheme();
+
+    els.modeLabel.textContent = state.mode === "study" ? "学习模式" : "休息模式";
+    els.timeDisplay.textContent = formatTime(state.remainingMs);
+    els.pomodoroCount.textContent = String(state.completedPomodoros);
+    els.dailyFocus.textContent = formatDuration(state.dailyFocusMs);
+    els.dailyFocus.className = `daily-time ${dailyLevel(state.dailyFocusMs)}`;
+    els.autoNext.checked = state.autoNext;
+    els.soundEnabled.checked = state.soundEnabled;
+    if (els.ringtoneSelect) {
+      els.ringtoneSelect.value = state.ringtone;
+    }
+    if (els.themeSelect) {
+      els.themeSelect.value = state.theme;
+    }
+
+    const paused = !state.isRunning && state.remainingMs > 0 && state.remainingMs < modeDuration(state.mode);
+    els.startBtn.disabled = state.isRunning || paused;
+    els.pauseBtn.disabled = !state.isRunning;
+    els.resumeBtn.disabled = state.isRunning || !paused;
+
+    updateExtendUI();
+    renderTodos();
+    renderContributionGrid();
+    renderDailyReview();
+    updateTitle();
+  }
+
+  function renderTodos() {
+    if (!els.todoList) return;
+    if (!state.todos.length) {
+      els.todoList.innerHTML = '<li class="todo-item"><span class="todo-text">暂无代办，先添加一项吧。</span></li>';
+      return;
+    }
+    els.todoList.innerHTML = state.todos.map((todo) => {
+      const safeText = todo.text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      return `
+        <li class="todo-item ${todo.done ? "done" : ""}" data-id="${todo.id}">
+          <input type="checkbox" class="todo-check" ${todo.done ? "checked" : ""} />
+          <span class="todo-drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
+          <span class="todo-text">${safeText}</span>
+          <button class="todo-del" type="button">删除</button>
+        </li>
+      `;
+    }).join("");
+  }
+
+  function addTodo() {
+    const text = (els.todoInput.value || "").trim();
+    if (!text) {
+      showToast("请输入代办内容");
+      return;
+    }
+    state.todos.unshift({
+      id: Date.now() + Math.floor(Math.random() * 1000),
+      text: text.slice(0, 80),
+      done: false
+    });
+    els.todoInput.value = "";
+    persist();
+    renderTodos();
+  }
+
+  function drawHourlyFocusChart(canvas, values, labels) {
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const cssWidth = Math.max(320, canvas.clientWidth || 960);
+    const cssHeight = 280;
+    canvas.width = Math.floor(cssWidth * dpr);
+    canvas.height = Math.floor(cssHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    const left = 34;
+    const right = 12;
+    const top = 14;
+    const bottom = 36;
+    const chartW = cssWidth - left - right;
+    const chartH = cssHeight - top - bottom;
+    const maxVal = Math.max(...values, 1);
+
+    ctx.strokeStyle = "rgba(120,140,170,0.35)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(left, top);
+    ctx.lineTo(left, top + chartH);
+    ctx.lineTo(left + chartW, top + chartH);
+    ctx.stroke();
+
+    const count = Math.max(1, values.length);
+    const barGap = count > 10 ? 2 : 4;
+    const barW = Math.max(4, (chartW - barGap * (count - 1)) / count);
+
+    const barColor = getComputedStyle(document.body).getPropertyValue("--accent").trim() || "#1b74ff";
+    ctx.fillStyle = barColor;
+    for (let i = 0; i < values.length; i += 1) {
+      const val = values[i] || 0;
+      const h = (val / maxVal) * (chartH - 4);
+      const x = left + i * (barW + barGap);
+      const y = top + chartH - h;
+      ctx.fillRect(x, y, barW, h);
+    }
+
+    ctx.fillStyle = "rgba(38, 55, 86, 1)";
+    ctx.font = "600 13px Segoe UI, sans-serif";
+    const step = Math.max(1, Math.ceil(labels.length / 8));
+    for (let i = 0; i < labels.length; i += step) {
+      const x = left + i * (barW + barGap);
+      ctx.fillText(String(labels[i]), x, top + chartH + 18);
+    }
+    if (labels.length > 1) {
+      const lastX = left + (labels.length - 1) * (barW + barGap);
+      ctx.fillText(String(labels[labels.length - 1]), lastX, top + chartH + 18);
+    }
+  }
+
+  function buildDailyAdvice(hourlyMs, totalMs, interruptions, mode = "24h", labels = []) {
+    const advice = [];
+    const maxHourMs = Math.max(...hourlyMs);
+    const peakHour = hourlyMs.findIndex((v) => v === maxHourMs);
+
+    if (totalMs < 60 * 60 * 1000) {
+      advice.push("今日专注时长偏少，建议先保证 1-2 个完整番茄钟，优先完成最重要任务。");
+    } else if (totalMs < 3 * 60 * 60 * 1000) {
+      advice.push("今日专注达标基础不错，可尝试把高优先级任务提前到精力最好的时段。");
+    } else {
+      advice.push("今日专注表现良好，建议保持当前节奏，并在晚间做简短复盘。");
+    }
+
+    if (mode === "24h" && peakHour >= 0 && maxHourMs > 0) {
+      const hourText = labels[peakHour] ?? String(peakHour);
+      advice.push(`你的高专注时段在 ${hourText} 点附近，建议把深度任务放到这个时间段。`);
+    }
+    if (mode === "7d" && peakHour >= 0 && maxHourMs > 0) {
+      const dayText = labels[peakHour] ?? "某天";
+      advice.push(`过去7天中 ${dayText} 的专注表现最佳，可复用当天的作息安排。`);
+    }
+
+    if (interruptions >= 6) {
+      advice.push("中断次数较高，建议下一轮开启免打扰并减少临时切换任务。");
+    } else if (interruptions >= 3) {
+      advice.push("中断次数中等，可在每轮开始前准备好资料，降低中途打断。");
+    } else {
+      advice.push("中断控制较好，可继续保持单任务工作流。");
+    }
+
+    return advice.slice(0, 3);
+  }
+
+  function getHourlyRowForKey(key) {
+    const row = state.focusHourHistory[key];
+    if (!Array.isArray(row) || row.length !== 24) return Array(24).fill(0);
+    return row.map((v) => Number(v) || 0);
+  }
+
+  function getDailyTotalForKey(key) {
+    return Math.max(0, Number(state.focusHistory[key]) || 0);
+  }
+
+  function hasHourlyRow(key) {
+    return Array.isArray(state.focusHourHistory[key]) && state.focusHourHistory[key].length === 24;
+  }
+
+  function buildReviewSeries(range) {
+    const now = new Date();
+    if (range === "7d") {
+      const labels = [];
+      const values = [];
+      let interruptions = 0;
+      for (let i = 6; i >= 0; i -= 1) {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+        const key = todayKey(d.getTime());
+        const total = hasHourlyRow(key)
+          ? getHourlyRowForKey(key).reduce((s, v) => s + v, 0)
+          : getDailyTotalForKey(key);
+        labels.push(`${d.getMonth() + 1}/${d.getDate()}`);
+        values.push(total);
+        interruptions += Number(state.dailyInterruptions[key]) || 0;
+      }
+      const totalMs = values.reduce((s, v) => s + v, 0);
+      const start = labels[0] || "";
+      const end = labels[labels.length - 1] || "";
+      return {
+        title: "过去7天专注时长分布（柱状图）",
+        dateText: `${start} - ${end}`,
+        labels,
+        values,
+        totalMs,
+        interruptions,
+        mode: "7d"
+      };
+    }
+
+    const labels = [];
+    const values = [];
+    const keySet = new Set();
+    for (let i = 23; i >= 0; i -= 1) {
+      const ts = Date.now() - i * 60 * 60 * 1000;
+      const d = new Date(ts);
+      const key = todayKey(ts);
+      const hour = d.getHours();
+      const row = getHourlyRowForKey(key);
+      const fallbackHourValue = getDailyTotalForKey(key) / 24;
+      labels.push(String(hour));
+      values.push(hasHourlyRow(key) ? (row[hour] || 0) : fallbackHourValue);
+      keySet.add(key);
+    }
+    let interruptions = 0;
+    keySet.forEach((k) => {
+      interruptions += Number(state.dailyInterruptions[k]) || 0;
+    });
+    return {
+      title: "过去24小时专注时长分布（柱状图）",
+      dateText: "最近24小时",
+      labels,
+      values,
+      totalMs: values.reduce((s, v) => s + v, 0),
+      interruptions,
+      mode: "24h"
+    };
+  }
+
+  function renderDailyReviewPanel({ dateEl, canvasEl, interruptEl, totalEl, adviceEl }) {
+    const data = buildReviewSeries(state.reviewRange);
+
+    if (dateEl) {
+      dateEl.textContent = data.dateText;
+    }
+    if (interruptEl) {
+      interruptEl.textContent = String(data.interruptions);
+    }
+    if (totalEl) {
+      totalEl.textContent = formatDuration(data.totalMs);
+    }
+
+    drawHourlyFocusChart(canvasEl, data.values, data.labels);
+
+    if (adviceEl) {
+      const tips = buildDailyAdvice(data.values, data.totalMs, data.interruptions, data.mode, data.labels);
+      adviceEl.innerHTML = tips.map((tip) => `<li>${tip}</li>`).join("");
+    }
+
+    if (els.modalReviewSubtitle && canvasEl === els.modalHourlyChart) {
+      els.modalReviewSubtitle.textContent = data.title;
+    }
+  }
+
+  function renderDailyReview() {
+    if (els.reviewRange24Btn && els.reviewRange7Btn) {
+      els.reviewRange24Btn.classList.toggle("active", state.reviewRange === "24h");
+      els.reviewRange7Btn.classList.toggle("active", state.reviewRange === "7d");
+    }
+    renderDailyReviewPanel({
+      dateEl: els.reviewDate,
+      canvasEl: els.hourlyChart,
+      interruptEl: els.interruptCount,
+      totalEl: els.reviewTotalFocus,
+      adviceEl: els.reviewAdvice
+    });
+    renderDailyReviewPanel({
+      dateEl: els.modalReviewDate,
+      canvasEl: els.modalHourlyChart,
+      interruptEl: els.modalInterruptCount,
+      totalEl: els.modalReviewTotalFocus,
+      adviceEl: els.modalReviewAdvice
+    });
+  }
+
+  function clearTodoDragMarkers() {
+    els.todoList.querySelectorAll(".todo-item").forEach((el) => {
+      el.classList.remove("drag-over-top", "drag-over-bottom");
+    });
+  }
+
+  function moveTodoByDrag(dragId, targetId, beforeTarget) {
+    if (!Number.isFinite(dragId) || dragId === targetId) return;
+    const fromIndex = state.todos.findIndex((t) => t.id === dragId);
+    if (fromIndex < 0) return;
+
+    const [moved] = state.todos.splice(fromIndex, 1);
+
+    if (!Number.isFinite(targetId)) {
+      state.todos.push(moved);
+      persist();
+      renderTodos();
+      return;
+    }
+
+    let toIndex = state.todos.findIndex((t) => t.id === targetId);
+    if (toIndex < 0) {
+      state.todos.push(moved);
+    } else {
+      if (!beforeTarget) toIndex += 1;
+      state.todos.splice(toIndex, 0, moved);
+    }
+    persist();
+    renderTodos();
+  }
+
+  function updateExtendUI() {
+    if (!els.extendPresetSelect) return;
+    const cfg = EXTEND_CONFIG[state.mode];
+    const modeKey = state.mode;
+    if (els.extendPresetSelect.dataset.mode !== modeKey) {
+      const presetOptions = cfg.presets
+        .map((m) => `<option value="preset:${m}">+${m} 分钟</option>`)
+        .join("");
+      els.extendPresetSelect.innerHTML = `${presetOptions}<option value="custom">自定义</option>`;
+      els.extendPresetSelect.dataset.mode = modeKey;
+      els.extendPresetSelect.value = `preset:${cfg.presets[0]}`;
+      els.extendCustomMinutes.value = "";
+    }
+
+    els.extendCustomMinutes.max = String(cfg.maxCustom);
+    els.extendCustomMinutes.placeholder = `自定义(<=${cfg.maxCustom})`;
+    if (els.extendHint) {
+      const presetText = cfg.presets.map((m) => `${m}分钟`).join("、");
+      els.extendHint.textContent = `${cfg.label}模式可延长：${presetText}，或自定义（不超过${cfg.maxCustom}分钟）`;
+    }
+
+    const usingCustom = els.extendPresetSelect.value === "custom";
+    els.extendCustomMinutes.disabled = !usingCustom;
+  }
+
+  function tick() {
+    const now = Date.now();
+    if (state.isRunning && state.mode === "study" && lastTickAt !== null) {
+      addFocusOverlap(lastTickAt, now);
+    }
+    lastTickAt = now;
+    state.remainingMs = Math.max(0, state.endTime - now);
+    render();
+
+    if (state.remainingMs === 0) {
+      stopTimer(false);
+      handlePhaseComplete();
+    } else {
+      persist();
+    }
+  }
+
+  function startTimer() {
+    if (state.isRunning) return;
+    ensureTodayBucket();
+    state.isRunning = true;
+    lastTickAt = Date.now();
+    state.endTime = Date.now() + state.remainingMs;
+    tick();
+    timerId = setInterval(tick, 250);
+    persist();
+  }
+
+  function resumeRunningTimer() {
+    if (!state.isRunning) return;
+    if (timerId) {
+      clearInterval(timerId);
+      timerId = null;
+    }
+    lastTickAt = Date.now();
+    tick();
+    timerId = setInterval(tick, 250);
+  }
+
+  function stopTimer(shouldReset = false) {
+    if (timerId) {
+      clearInterval(timerId);
+      timerId = null;
+    }
+    state.isRunning = false;
+    lastTickAt = null;
+    if (shouldReset) {
+      state.remainingMs = modeDuration(state.mode);
+    }
+    persist();
+    render();
+  }
+
+  function pauseTimer() {
+    if (!state.isRunning) return;
+    if (state.mode === "study" && state.remainingMs > 0 && state.remainingMs < modeDuration("study")) {
+      const key = todayKey();
+      state.dailyInterruptions[key] = (Number(state.dailyInterruptions[key]) || 0) + 1;
+    }
+    state.remainingMs = Math.max(0, state.endTime - Date.now());
+    stopTimer(false);
+  }
+
+  function resetAll() {
+    stopTimer(false);
+    ensureTodayBucket();
+    state.mode = "study";
+    state.remainingMs = STUDY_MS;
+    state.endTime = 0;
+    persist();
+    render();
+  }
+
+  function stopRingtone() {
+    if (stopRingtoneTimer) {
+      clearTimeout(stopRingtoneTimer);
+      stopRingtoneTimer = null;
+    }
+    if (activeAudioCtx) {
+      activeAudioCtx.close().catch(() => {});
+      activeAudioCtx = null;
+    }
+  }
+
+  function scheduleTone(ctx, freq, startAt, toneSec, type = "sine", volume = 0.16) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, startAt);
+    gain.gain.exponentialRampToValueAtTime(volume, startAt + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startAt + toneSec);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(startAt);
+    osc.stop(startAt + toneSec + 0.02);
+  }
+
+  function playRingtone({ durationMs = 5000, force = false } = {}) {
+    if (!force && !state.soundEnabled) return;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      stopRingtone();
+
+      const ctx = new Ctx();
+      activeAudioCtx = ctx;
+      const start = ctx.currentTime + 0.03;
+      const totalSec = Math.max(1, durationMs / 1000);
+
+      if (state.ringtone === "digital") {
+        const notes = [523.25, 659.25, 783.99, 659.25];
+        let t = 0;
+        let i = 0;
+        while (t < totalSec) {
+          scheduleTone(ctx, notes[i % notes.length], start + t, 0.18, "triangle", 0.15);
+          t += 0.35;
+          i += 1;
+        }
+      } else if (state.ringtone === "soft") {
+        const notes = [660, 587.33, 523.25, 587.33];
+        let t = 0;
+        let i = 0;
+        while (t < totalSec) {
+          scheduleTone(ctx, notes[i % notes.length], start + t, 0.45, "sine", 0.11);
+          t += 0.75;
+          i += 1;
+        }
+      } else if (state.ringtone === "urgent") {
+        let t = 0;
+        while (t < totalSec) {
+          scheduleTone(ctx, 987.77, start + t, 0.14, "square", 0.18);
+          scheduleTone(ctx, 880, start + t + 0.18, 0.14, "square", 0.18);
+          t += 0.55;
+        }
+      } else {
+        let t = 0;
+        while (t < totalSec) {
+          scheduleTone(ctx, 880, start + t, 0.22, "sine", 0.16);
+          t += 0.8;
+        }
+      }
+
+      stopRingtoneTimer = setTimeout(() => {
+        stopRingtone();
+      }, durationMs + 250);
+    } catch {
+      // Ignore audio errors.
+    }
+  }
+
+  async function requestNotificationPermission() {
+    if (!("Notification" in window)) {
+      alert("当前浏览器不支持桌面通知");
+      return;
+    }
+    if (Notification.permission === "granted") {
+      alert("桌面通知已开启");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    alert(permission === "granted" ? "通知授权成功" : "未授予通知权限");
+  }
+
+  function showToast(message) {
+    const old = document.getElementById("pomodoro-toast");
+    if (old) {
+      old.remove();
+    }
+
+    const toast = document.createElement("div");
+    toast.id = "pomodoro-toast";
+    toast.textContent = message;
+    toast.style.position = "fixed";
+    toast.style.right = "16px";
+    toast.style.bottom = "16px";
+    toast.style.zIndex = "9999";
+    toast.style.maxWidth = "320px";
+    toast.style.padding = "10px 12px";
+    toast.style.borderRadius = "10px";
+    toast.style.color = "#fff";
+    toast.style.background = "rgba(17, 24, 39, 0.9)";
+    toast.style.boxShadow = "0 6px 18px rgba(0, 0, 0, 0.25)";
+    toast.style.fontSize = "0.9rem";
+    toast.style.lineHeight = "1.3";
+
+    document.body.appendChild(toast);
+    setTimeout(() => {
+      if (toast.parentNode) toast.remove();
+    }, 2400);
+  }
+
+  function notify(text) {
+    playRingtone({ durationMs: 5000, force: false });
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification("番茄钟提醒", { body: text });
+    } else {
+      showToast(text);
+    }
+  }
+
+  function applyExtension(minutesInput = null) {
+    const cfg = EXTEND_CONFIG[state.mode];
+    const selected = minutesInput === null ? els.extendPresetSelect.value : null;
+    let addMinutes = 0;
+
+    if (minutesInput !== null) {
+      if (!Number.isFinite(minutesInput) || minutesInput <= 0) {
+        showToast("请选择有效的快捷延长时长");
+        return;
+      }
+      addMinutes = Math.floor(minutesInput);
+    } else if (selected === "custom") {
+      const inputMinutes = Number(els.extendCustomMinutes.value);
+      if (!Number.isFinite(inputMinutes) || inputMinutes <= 0) {
+        showToast("请输入有效的自定义分钟数");
+        return;
+      }
+      if (inputMinutes > cfg.maxCustom) {
+        showToast(`${cfg.label}模式自定义延长不能超过 ${cfg.maxCustom} 分钟`);
+        return;
+      }
+      addMinutes = Math.floor(inputMinutes);
+      if (addMinutes < 1) {
+        showToast("自定义延长至少为 1 分钟");
+        return;
+      }
+    } else {
+      const presetMinutes = Number(String(selected).replace("preset:", ""));
+      if (!cfg.presets.includes(presetMinutes)) {
+        showToast("请选择有效的延长时长");
+        return;
+      }
+      addMinutes = presetMinutes;
+    }
+
+    if (state.mode === "study" && addMinutes > EXTEND_CONFIG.study.maxCustom) {
+      showToast(`学习模式单次最多延长 ${EXTEND_CONFIG.study.maxCustom} 分钟`);
+      return;
+    }
+    if (state.mode === "break" && addMinutes > EXTEND_CONFIG.break.maxCustom) {
+      showToast(`休息模式单次最多延长 ${EXTEND_CONFIG.break.maxCustom} 分钟`);
+      return;
+    }
+
+    const addMs = addMinutes * 60 * 1000;
+    state.remainingMs += addMs;
+    if (state.isRunning) {
+      state.endTime += addMs;
+    }
+    persist();
+    render();
+    showToast(`已延长 ${addMinutes} 分钟`);
+  }
+
+  function switchMode() {
+    if (state.mode === "study") {
+      state.mode = "break";
+      state.remainingMs = BREAK_MS;
+    } else {
+      state.mode = "study";
+      state.remainingMs = STUDY_MS;
+    }
+    state.endTime = 0;
+  }
+
+  function handlePhaseComplete() {
+    const finishedMode = state.mode;
+    if (finishedMode === "study") {
+      state.completedPomodoros += 1;
+    }
+
+    switchMode();
+
+    const msg = finishedMode === "study"
+      ? "35分钟学习结束，开始休息5分钟。"
+      : "5分钟休息结束，开始下一轮35分钟学习。";
+
+    notify(msg);
+    persist();
+    render();
+
+    if (state.autoNext) {
+      startTimer();
+    }
+  }
+
+  function bindEvents() {
+    els.startBtn.addEventListener("click", () => {
+      const paused = !state.isRunning && state.remainingMs > 0 && state.remainingMs < modeDuration(state.mode);
+      if (paused) return;
+      if (state.remainingMs <= 0) {
+        state.remainingMs = modeDuration(state.mode);
+      }
+      startTimer();
+    });
+
+    els.pauseBtn.addEventListener("click", pauseTimer);
+
+    els.resumeBtn.addEventListener("click", () => {
+      if (state.remainingMs > 0) startTimer();
+    });
+
+    els.resetBtn.addEventListener("click", resetAll);
+
+    els.extendPresetSelect.addEventListener("change", () => {
+      updateExtendUI();
+    });
+
+    els.applyExtendBtn.addEventListener("click", () => applyExtension());
+
+    quickExtendButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const minutes = Number(btn.dataset.minutes);
+        applyExtension(minutes);
+      });
+    });
+
+    els.autoNext.addEventListener("change", (e) => {
+      state.autoNext = e.target.checked;
+      persist();
+    });
+
+    els.soundEnabled.addEventListener("change", (e) => {
+      state.soundEnabled = e.target.checked;
+      persist();
+    });
+
+    els.ringtoneSelect.addEventListener("change", (e) => {
+      const allowedRingtones = ["classic", "digital", "soft", "urgent"];
+      const value = allowedRingtones.includes(e.target.value) ? e.target.value : "classic";
+      state.ringtone = value;
+      persist();
+    });
+
+    els.previewSoundBtn.addEventListener("click", () => {
+      playRingtone({ durationMs: 5000, force: true });
+    });
+
+    els.addTodoBtn.addEventListener("click", addTodo);
+
+    els.todoInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        addTodo();
+      }
+    });
+
+    els.clearDoneBtn.addEventListener("click", () => {
+      const before = state.todos.length;
+      state.todos = state.todos.filter((t) => !t.done);
+      if (state.todos.length !== before) {
+        persist();
+        renderTodos();
+      }
+    });
+
+    els.todoList.addEventListener("click", (e) => {
+      const item = e.target.closest(".todo-item");
+      if (!item) return;
+      const id = Number(item.dataset.id);
+      if (!Number.isFinite(id)) return;
+
+      if (e.target.classList.contains("todo-del")) {
+        state.todos = state.todos.filter((t) => t.id !== id);
+        persist();
+        renderTodos();
+      }
+    });
+
+    els.todoList.addEventListener("change", (e) => {
+      if (!e.target.classList.contains("todo-check")) return;
+      const item = e.target.closest(".todo-item");
+      if (!item) return;
+      const id = Number(item.dataset.id);
+      const todo = state.todos.find((t) => t.id === id);
+      if (!todo) return;
+      todo.done = e.target.checked;
+      persist();
+      renderTodos();
+    });
+
+    els.todoList.addEventListener("dragstart", (e) => {
+      const handle = e.target.closest(".todo-drag-handle");
+      if (!handle) return;
+      const item = handle.closest(".todo-item");
+      if (!item || !item.dataset.id) return;
+      draggingTodoId = Number(item.dataset.id);
+      if (!Number.isFinite(draggingTodoId)) return;
+      item.classList.add("dragging");
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", String(draggingTodoId));
+      }
+    });
+
+    els.todoList.addEventListener("dragend", () => {
+      draggingTodoId = null;
+      clearTodoDragMarkers();
+      els.todoList.querySelectorAll(".todo-item").forEach((el) => el.classList.remove("dragging"));
+    });
+
+    els.todoList.addEventListener("dragover", (e) => {
+      if (!Number.isFinite(draggingTodoId)) return;
+      e.preventDefault();
+      clearTodoDragMarkers();
+      const item = e.target.closest(".todo-item");
+      if (!item || !item.dataset.id) return;
+      const rect = item.getBoundingClientRect();
+      const before = e.clientY < rect.top + rect.height / 2;
+      item.classList.add(before ? "drag-over-top" : "drag-over-bottom");
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    });
+
+    els.todoList.addEventListener("drop", (e) => {
+      if (!Number.isFinite(draggingTodoId)) return;
+      e.preventDefault();
+      const item = e.target.closest(".todo-item");
+      if (!item || !item.dataset.id) {
+        moveTodoByDrag(draggingTodoId, NaN, false);
+        draggingTodoId = null;
+        clearTodoDragMarkers();
+        return;
+      }
+      const targetId = Number(item.dataset.id);
+      const rect = item.getBoundingClientRect();
+      const before = e.clientY < rect.top + rect.height / 2;
+      moveTodoByDrag(draggingTodoId, targetId, before);
+      draggingTodoId = null;
+      clearTodoDragMarkers();
+    });
+
+    els.themeSelect.addEventListener("change", (e) => {
+      const value = e.target.value;
+      state.theme = value === "green" || value === "dark" ? value : "blue";
+      applyTheme();
+      persist();
+      render();
+    });
+
+    els.openReviewModalBtn.addEventListener("click", () => {
+      els.reviewModal.classList.remove("hidden");
+      els.reviewModal.setAttribute("aria-hidden", "false");
+      renderDailyReview();
+    });
+
+    els.reviewRange24Btn.addEventListener("click", () => {
+      state.reviewRange = "24h";
+      persist();
+      renderDailyReview();
+    });
+
+    els.reviewRange7Btn.addEventListener("click", () => {
+      state.reviewRange = "7d";
+      persist();
+      renderDailyReview();
+    });
+
+    els.closeReviewModalBtn.addEventListener("click", () => {
+      els.reviewModal.classList.add("hidden");
+      els.reviewModal.setAttribute("aria-hidden", "true");
+    });
+
+    els.reviewModal.addEventListener("click", (e) => {
+      if (e.target === els.reviewModal) {
+        els.reviewModal.classList.add("hidden");
+        els.reviewModal.setAttribute("aria-hidden", "true");
+      }
+    });
+
+    els.notifyBtn.addEventListener("click", requestNotificationPermission);
+
+    els.monthSelect.addEventListener("change", (e) => {
+      const month = Number(e.target.value);
+      if (!Number.isInteger(month) || month < 0 || month > 11) return;
+      state.selectedMonth = month;
+      persist();
+      render();
+    });
+
+    els.viewModeSelect.addEventListener("change", (e) => {
+      const mode = e.target.value === "compact" ? "compact" : "detailed";
+      state.viewMode = mode;
+      persist();
+      render();
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (!state.isRunning) return;
+      const now = Date.now();
+      if (state.mode === "study" && lastTickAt !== null) {
+        addFocusOverlap(lastTickAt, now);
+      }
+      lastTickAt = now;
+      state.remainingMs = Math.max(0, state.endTime - now);
+      render();
+      if (state.remainingMs === 0) {
+        stopTimer(false);
+        handlePhaseComplete();
+      }
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !els.reviewModal.classList.contains("hidden")) {
+        els.reviewModal.classList.add("hidden");
+        els.reviewModal.setAttribute("aria-hidden", "true");
+      }
+    });
+  }
+
+  function boot() {
+    restore();
+    if (els.monthSelect) {
+      els.monthSelect.innerHTML = MONTH_LABELS
+        .map((label, idx) => `<option value="${idx}">${label}</option>`)
+        .join("");
+      els.monthSelect.value = String(state.selectedMonth);
+    }
+    if (els.viewModeSelect) {
+      els.viewModeSelect.value = state.viewMode;
+    }
+    bindEvents();
+    render();
+
+    if (state.isRunning) {
+      resumeRunningTimer();
+    }
+  }
+
+  boot();
+})();
