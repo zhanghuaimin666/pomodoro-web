@@ -764,6 +764,19 @@
     timerId = setInterval(tick, 250);
   }
 
+  function pauseForPageExit() {
+    if (!state.isRunning) return;
+    if (timerId) {
+      clearInterval(timerId);
+      timerId = null;
+    }
+    state.remainingMs = Math.max(0, state.endTime - Date.now());
+    state.isRunning = false;
+    state.endTime = 0;
+    lastTickAt = null;
+    persist();
+  }
+
   function stopTimer(shouldReset = false) {
     if (timerId) {
       clearInterval(timerId);
@@ -1233,6 +1246,9 @@
         els.reviewModal.setAttribute("aria-hidden", "true");
       }
     });
+
+    window.addEventListener("pagehide", pauseForPageExit);
+    window.addEventListener("beforeunload", pauseForPageExit);
   }
 
   function boot() {

@@ -173,12 +173,67 @@ h1 {
   border: 1px solid #cdd9ef;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.35);
+  position: relative;
 }
 
 .extend-title {
   font-size: 0.9rem;
   color: var(--muted);
   margin-bottom: 8px;
+}
+
+.extend-trigger {
+  display: block;
+  width: 100%;
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 0;
+  font-size: 0.95rem;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.extend-trigger:hover,
+.extend-box:hover .extend-trigger,
+.extend-box:focus-within .extend-trigger {
+  background: var(--accent-strong);
+  color: #fff;
+}
+
+.extend-details {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 100%;
+  z-index: 30;
+  margin-top: 8px;
+  padding: 10px;
+  background: var(--card);
+  border: 1px solid #cdd9ef;
+  border-radius: 12px;
+  box-shadow: 0 14px 30px rgba(13, 68, 163, 0.18);
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 0.28s ease, transform 0.28s ease, visibility 0s linear 0.28s;
+}
+
+.extend-details-inner {
+  overflow: hidden;
+}
+
+.extend-box:hover .extend-details,
+.extend-box:focus-within .extend-details {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  visibility: visible;
+  transition: opacity 0.28s ease, transform 0.28s ease, visibility 0s linear 0s;
 }
 
 .extend-controls {
