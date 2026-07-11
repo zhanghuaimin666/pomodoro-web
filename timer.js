@@ -1268,6 +1268,32 @@
     if (state.isRunning) {
       resumeRunningTimer();
     }
+
+    // 全屏模式按钮与快捷键
+    const fullscreenBtn = document.getElementById("fullscreenBtn");
+    function toggleFullscreen() {
+      var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!fsEl) {
+        var el = document.documentElement;
+        (el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen).call(el);
+      } else {
+        (document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen).call(document);
+      }
+    }
+    function updateFullscreenBtn() {
+      var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      fullscreenBtn.innerHTML = fsEl ? "\u26F6 退出全屏" : "\u26F6 全屏";
+    }
+    fullscreenBtn.addEventListener("click", toggleFullscreen);
+    document.addEventListener("fullscreenchange", updateFullscreenBtn);
+    document.addEventListener("webkitfullscreenchange", updateFullscreenBtn);
+    document.addEventListener("keydown", function(e) {
+      if (e.key !== "Escape") return;
+      if (!els.reviewModal.classList.contains("hidden")) return;
+      var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!fsEl) toggleFullscreen();
+    });
+
   }
 
   boot();

@@ -740,3 +740,34 @@ button:disabled { background: #9fb5d8; color: #f0f4ff; cursor: not-allowed; }
     height: 10px;
   }
 }
+
+
+/* È«ÆÁ°´Å¥ */
+.fullscreen-btn {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9997;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.88rem;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.25s ease, background 0.2s ease;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+}
+
+.fullscreen-btn:hover {
+  opacity: 1;
+  background: var(--accent-strong);
+}
+
+.fullscreen-btn:active {
+  opacity: 0.85;
+}
