@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   --bg1: #eef5ff;
   --bg2: #d6e7ff;
   --card: #ffffff;
@@ -169,18 +169,9 @@ h1 {
 
 .extend-box {
   margin-top: 12px;
-  padding: 10px;
-  border: 1px solid #cdd9ef;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.35);
   position: relative;
 }
 
-.extend-title {
-  font-size: 0.9rem;
-  color: var(--muted);
-  margin-bottom: 8px;
-}
 
 .extend-trigger {
   display: block;
@@ -197,30 +188,51 @@ h1 {
   transition: background 0.2s ease;
 }
 
-.extend-trigger:hover,
-.extend-box:hover .extend-trigger,
-.extend-box:focus-within .extend-trigger {
+.extend-trigger::after {
+  content: "▾";
+  display: inline-block;
+  margin-left: 5px;
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.extend-trigger:hover {
   background: var(--accent-strong);
   color: #fff;
 }
 
+.extend-box:hover .extend-trigger::after,
+.extend-box:focus-within .extend-trigger::after {
+  transform: rotate(180deg);
+}
+
 .extend-details {
   position: absolute;
-  left: 10px;
-  right: 10px;
-  top: 100%;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
   z-index: 30;
-  margin-top: 8px;
-  padding: 10px;
+  padding: 12px;
   background: var(--card);
   border: 1px solid #cdd9ef;
   border-radius: 12px;
   box-shadow: 0 14px 30px rgba(13, 68, 163, 0.18);
   opacity: 0;
-  transform: translateY(-6px);
+  transform: translateY(-10px) scaleY(0.95);
+  transform-origin: top center;
   pointer-events: none;
   visibility: hidden;
-  transition: opacity 0.28s ease, transform 0.28s ease, visibility 0s linear 0.28s;
+  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              visibility 0s linear 0.35s;
+}
+
+.extend-details::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: 0;
+  right: 0;
+  height: 8px;
 }
 
 .extend-details-inner {
@@ -230,10 +242,12 @@ h1 {
 .extend-box:hover .extend-details,
 .extend-box:focus-within .extend-details {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scaleY(1);
   pointer-events: auto;
   visibility: visible;
-  transition: opacity 0.28s ease, transform 0.28s ease, visibility 0s linear 0s;
+  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              visibility 0s linear 0s;
 }
 
 .extend-controls {
@@ -269,7 +283,7 @@ h1 {
 }
 
 .extend-hint {
-  margin-top: 8px;
+  margin-top: 6px;
   color: var(--muted);
   font-size: 0.82rem;
 }
@@ -288,7 +302,7 @@ button:hover { background: var(--accent-strong); }
 button:disabled { background: #9fb5d8; color: #f0f4ff; cursor: not-allowed; }
 
 .toggles {
-  margin-top: 14px;
+  margin-top: 10px;
   display: grid;
   gap: 8px;
   color: var(--muted);
@@ -297,7 +311,7 @@ button:disabled { background: #9fb5d8; color: #f0f4ff; cursor: not-allowed; }
 
 .notify {
   width: 100%;
-  margin-top: 14px;
+  margin-top: 10px;
   background: var(--ok);
 }
 
@@ -305,7 +319,7 @@ button:disabled { background: #9fb5d8; color: #f0f4ff; cursor: not-allowed; }
 
 .review-btn {
   width: 100%;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .todo-card {
@@ -588,7 +602,7 @@ button:disabled { background: #9fb5d8; color: #f0f4ff; cursor: not-allowed; }
 }
 
 .review-card {
-  margin-top: 14px;
+  margin-top: 10px;
 }
 
 .review-header {
