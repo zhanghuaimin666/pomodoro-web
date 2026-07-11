@@ -68,18 +68,22 @@
         </div>
 
         <div class="extend-box">
-          <div class="extend-title">延长当前阶段</div>
-          <div class="quick-extend">
-            <button class="secondary-btn quick-extend-btn" type="button" data-minutes="2">+2m</button>
-            <button class="secondary-btn quick-extend-btn" type="button" data-minutes="5">+5m</button>
-            <button class="secondary-btn quick-extend-btn" type="button" data-minutes="10">+10m</button>
+          <button type="button" class="extend-trigger">延长当前阶段</button>
+          <div class="extend-details">
+            <div class="extend-details-inner">
+              <div class="quick-extend">
+                <button class="secondary-btn quick-extend-btn" type="button" data-minutes="2">+2m</button>
+                <button class="secondary-btn quick-extend-btn" type="button" data-minutes="5">+5m</button>
+                <button class="secondary-btn quick-extend-btn" type="button" data-minutes="10">+10m</button>
+              </div>
+              <div class="extend-controls">
+                <select id="extendPresetSelect"></select>
+                <input id="extendCustomMinutes" type="number" min="1" step="1" placeholder="自定义分钟" />
+                <button id="applyExtendBtn" class="secondary-btn" type="button">延长</button>
+              </div>
+              <div id="extendHint" class="extend-hint"></div>
+            </div>
           </div>
-          <div class="extend-controls">
-            <select id="extendPresetSelect"></select>
-            <input id="extendCustomMinutes" type="number" min="1" step="1" placeholder="自定义分钟" />
-            <button id="applyExtendBtn" class="secondary-btn" type="button">延长</button>
-          </div>
-          <div id="extendHint" class="extend-hint"></div>
         </div>
 
         <div class="toggles">
