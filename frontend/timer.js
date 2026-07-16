@@ -50,7 +50,14 @@
     ringtoneSelect: document.getElementById("ringtoneSelect"),
     previewSoundBtn: document.getElementById("previewSoundBtn"),
     themeSelect: document.getElementById("themeSelect"),
-    notifyBtn: document.getElementById("notifyBtn")
+    notifyBtn: document.getElementById("notifyBtn"),
+      subtitleDisplay: document.getElementById("subtitleDisplay"),
+    openSettingsBtn: document.getElementById("openSettingsBtn"),
+    settingsModal: document.getElementById("settingsModal"),
+    closeSettingsBtn: document.getElementById("closeSettingsBtn"),
+    studyMinutesInput: document.getElementById("studyMinutesInput"),
+    breakMinutesInput: document.getElementById("breakMinutesInput"),
+    saveSettingsBtn: document.getElementById("saveSettingsBtn"),
   };
 
   const state = {
@@ -71,7 +78,9 @@
     autoNext: true,
     soundEnabled: true,
     ringtone: "classic",
-    theme: "blue"
+    theme: "blue",
+    studyMinutes: 35,
+    breakMinutes: 5
   };
 
   let timerId = null;
@@ -82,7 +91,8 @@
   let draggingTodoId = null;
 
   function modeDuration(mode) {
-    return mode === "study" ? STUDY_MS : BREAK_MS;
+    var mins = mode === "study" ? state.studyMinutes : state.breakMinutes;
+    return Math.max(60000, mins * 60 * 1000);
   }
 
   function formatTime(ms) {
@@ -420,7 +430,10 @@
     renderContributionGrid();
     renderDailyReview();
     updateTitle();
-  }
+     if (els.subtitleDisplay) {
+      els.subtitleDisplay.textContent = state.studyMinutes + "\u5206\u949F\u5B66\u4E60 + " + state.breakMinutes + "\u5206\u949F\u4F11\u606F";
+    }
+   }
 
   function renderTodos() {
     if (!els.todoList) return;
@@ -805,7 +818,7 @@
     stopTimer(false);
     ensureTodayBucket();
     state.mode = "study";
-    state.remainingMs = STUDY_MS;
+    state.remainingMs = modeDuration("study");
     state.endTime = 0;
     persist();
     render();
@@ -996,10 +1009,10 @@
   function switchMode() {
     if (state.mode === "study") {
       state.mode = "break";
-      state.remainingMs = BREAK_MS;
+      state.remainingMs = modeDuration("break");
     } else {
       state.mode = "study";
-      state.remainingMs = STUDY_MS;
+      state.remainingMs = modeDuration("study");
     }
     state.endTime = 0;
   }
@@ -1293,6 +1306,56 @@
       var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
       if (!fsEl) toggleFullscreen();
     });
+    // 设置弹窗
+    els.openSettingsBtn.addEventListener("click", function() {
+      els.studyMinutesInput.value = String(state.studyMinutes);
+      els.breakMinutesInput.value = String(state.breakMinutes);
+      els.settingsModal.classList.remove("hidden");
+      els.settingsModal.setAttribute("aria-hidden", "false");
+    });
+    els.closeSettingsBtn.addEventListener("click", function() {
+      els.settingsModal.classList.add("hidden");
+      els.settingsModal.setAttribute("aria-hidden", "true");
+    });
+    els.settingsModal.addEventListener("click", function(e) {
+      if (e.target === els.settingsModal) {
+        els.settingsModal.classList.add("hidden");
+        els.settingsModal.setAttribute("aria-hidden", "true");
+      }
+    });
+    els.saveSettingsBtn.addEventListener("click", function() {
+      var study = parseInt(els.studyMinutesInput.value, 10);
+      var brk = parseInt(els.breakMinutesInput.value, 10);
+      if (!study || study < 1) study = 35;
+      if (!brk || brk < 1) brk = 5;
+      study = Math.min(180, Math.max(1, study));
+      brk = Math.min(60, Math.max(1, brk));
+      state.studyMinutes = study;
+      state.breakMinutes = brk;
+      stopTimer(false);
+      state.remainingMs = modeDuration(state.mode);
+      state.endTime = 0;
+      els.settingsModal.classList.add("hidden");
+      els.settingsModal.setAttribute("aria-hidden", "true");
+      persist();
+      render();
+    });
+    document.addEventListener("keydown", function settingsEsc(e) {
+      if (e.key === "Escape" && !els.settingsModal.classList.contains("hidden")) {
+        els.settingsModal.classList.add("hidden");
+        els.settingsModal.setAttribute("aria-hidden", "true");
+      }
+    });
+    // 注册 Service Worker（PWA 离线支持）
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./sw.js").then(function(reg) {
+        console.log("SW registered:", reg.scope);
+      }).catch(function(err) {
+        console.log("SW registration failed:", err);
+      });
+    }
+
+
 
   }
 

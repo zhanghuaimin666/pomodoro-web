@@ -3,13 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="manifest" href="manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="番茄钟" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="theme-color" content="#1b74ff" />
   <title>番茄钟 35/5</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <main class="app">
     <h1>番茄钟</h1>
-    <p class="subtitle">35分钟学习 + 5分钟休息</p>
+    <p class="subtitle" id="subtitleDisplay">35分钟学习 + 5分钟休息</p>
 
     <div class="content-grid">
       <section class="card calendar-card">
@@ -104,13 +109,14 @@
             <select id="themeSelect">
               <option value="blue">蓝色</option>
               <option value="green">绿色</option>
-              <option value="dark">暗色（旧版）</option>
+              <option value="dark">暗色</option>
             </select>
           </label>
         </div>
 
         <button id="notifyBtn" class="notify">开启桌面通知</button>
-        <button id="openReviewModalBtn" class="secondary-btn review-btn" type="button">数据分析</button>
+       <button id="openReviewModalBtn" class="secondary-btn review-btn" type="button">数据分析</button>
+        <button id="openSettingsBtn" class="secondary-btn" type="button">⚙ 设置</button>
       </section>
 
       <section class="card todo-card">
@@ -149,6 +155,29 @@
       </div>
       <div class="review-advice-title">自动复盘建议</div>
       <ul id="modalReviewAdvice" class="review-advice"></ul>
+    </div>
+ </div>
+
+  <div id="settingsModal" class="review-modal hidden" aria-hidden="true">
+    <div class="review-modal-panel settings-panel">
+      <div class="review-header">
+        <div class="review-title">设置</div>
+        <button id="closeSettingsBtn" class="secondary-btn" type="button">关闭</button>
+      </div>
+      <div class="settings-body">
+        <label class="settings-row">
+          <span>学习时长</span>
+          <input id="studyMinutesInput" type="number" min="1" max="180" step="1" value="35" />
+          <span class="settings-unit">分钟</span>
+        </label>
+        <label class="settings-row">
+          <span>休息时长</span>
+          <input id="breakMinutesInput" type="number" min="1" max="60" step="1" value="5" />
+          <span class="settings-unit">分钟</span>
+        </label>
+        <p class="settings-hint">修改后会自动重置计时器</p>
+        <button id="saveSettingsBtn" class="notify" type="button">保存设置</button>
+      </div>
     </div>
   </div>
 
