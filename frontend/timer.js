@@ -7,8 +7,32 @@
     study: { presets: [5, 10], maxCustom: 20, label: "学习" },
     break: { presets: [2, 5, 10], maxCustom: 15, label: "休息" }
   };
+  const THEME_VALUES = ["blue", "green", "lavender", "sand", "mist", "midnight", "dark"];
 
-  const els = {
+
+
+const API_BASE = "/api";
+
+async function apiGet(p) {
+  try { var r = await fetch(API_BASE + p); return r.ok ? r.json() : null; } catch { return null; }
+}
+async function apiPost(p, d) {
+  try {
+    var r = await fetch(API_BASE + p, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(d) });
+    return r.ok ? r.json() : null;
+  } catch { return null; }
+}
+async function apiPatch(p) {
+  try { var r = await fetch(API_BASE + p, { method: "PATCH" }); return r.ok ? r.json() : null; } catch { return null; }
+}
+async function apiDelete(p) {
+  try {
+    var r = await fetch(API_BASE + p, { method: "DELETE" });
+    return r.ok;
+  } catch { return false; }
+}
+
+const els = {
     modeLabel: document.getElementById("modeLabel"),
     timeDisplay: document.getElementById("timeDisplay"),
     pomodoroCount: document.getElementById("pomodoroCount"),
@@ -29,6 +53,8 @@
     addTodoBtn: document.getElementById("addTodoBtn"),
     clearDoneBtn: document.getElementById("clearDoneBtn"),
     todoList: document.getElementById("todoList"),
+    currentTaskName: document.getElementById("currentTaskName"),
+    clearActiveTodoBtn: document.getElementById("clearActiveTodoBtn"),
     reviewDate: document.getElementById("reviewDate"),
     hourlyChart: document.getElementById("hourlyChart"),
     interruptCount: document.getElementById("interruptCount"),
@@ -51,7 +77,8 @@
     previewSoundBtn: document.getElementById("previewSoundBtn"),
     themeSelect: document.getElementById("themeSelect"),
     notifyBtn: document.getElementById("notifyBtn"),
-      subtitleDisplay: document.getElementById("subtitleDisplay"),
+    fullscreenBtn: document.getElementById("fullscreenBtn"),
+    subtitleDisplay: document.getElementById("subtitleDisplay"),
     openSettingsBtn: document.getElementById("openSettingsBtn"),
     settingsModal: document.getElementById("settingsModal"),
     closeSettingsBtn: document.getElementById("closeSettingsBtn"),
@@ -72,6 +99,9 @@
     focusHourHistory: {},
     dailyInterruptions: {},
     todos: [],
+    activeTodoId: null,
+    currentPomodoroTodoId: null,
+    currentPomodoroFocusMs: 0,
     selectedMonth: new Date().getMonth(),
     viewMode: "detailed",
     reviewRange: "24h",
@@ -89,6 +119,9 @@
   let stopRingtoneTimer = null;
   const quickExtendButtons = Array.from(document.querySelectorAll(".quick-extend-btn"));
   let draggingTodoId = null;
+  let lastServerSyncAt = 0;
+  let serverSyncInFlight = null;
+  let serverHydrated = false;
 
   function modeDuration(mode) {
     var mins = mode === "study" ? state.studyMinutes : state.breakMinutes;
@@ -156,6 +189,88 @@
     return result;
   }
 
+  function normalizeFocusHours(raw) {
+    if (!Array.isArray(raw) || raw.length !== 24) return Array(24).fill(0);
+    return raw.map((value) => {
+      const ms = Math.floor(Number(value) || 0);
+      return ms > 0 ? ms : 0;
+    });
+  }
+
+  function normalizeServerTodo(todo, fallbackPosition = 0) {
+    if (!todo || !Number.isFinite(Number(todo.id)) || typeof todo.text !== "string") {
+      return null;
+    }
+    return {
+      id: Number(todo.id),
+      text: todo.text.trim().slice(0, 80),
+      done: Boolean(todo.done),
+      position: Number.isFinite(Number(todo.position))
+        ? Number(todo.position)
+        : fallbackPosition,
+      pomodoroCount: Math.max(0, Math.floor(Number(todo.pomodoro_count) || 0)),
+      focusMs: Math.max(0, Math.floor(Number(todo.focus_ms) || 0))
+    };
+  }
+
+  function buildSessionPayload(date) {
+    const focusMs = Math.max(0, Math.floor(Number(state.focusHistory[date]) || 0));
+    const interruptions = Math.max(0, Math.floor(Number(state.dailyInterruptions[date]) || 0));
+    return {
+      date,
+      focus_ms: focusMs,
+      completed_pomodoros: date === todayKey() ? Math.max(0, Math.floor(state.completedPomodoros)) : 0,
+      interruptions,
+      focus_hours: normalizeFocusHours(state.focusHourHistory[date])
+    };
+  }
+
+  function applyServerSessions(sessions) {
+    const focusHistory = {};
+    const focusHourHistory = {};
+    const dailyInterruptions = {};
+    let todaySession = null;
+
+    sessions.forEach((session) => {
+      const date = typeof session.date === "string" ? session.date.slice(0, 10) : "";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+      focusHistory[date] = Math.max(0, Math.floor(Number(session.focus_ms) || 0));
+      focusHourHistory[date] = normalizeFocusHours(session.focus_hours);
+      dailyInterruptions[date] = Math.max(0, Math.floor(Number(session.interruptions) || 0));
+      if (date === todayKey()) todaySession = session;
+    });
+
+    state.focusHistory = parseHistory(focusHistory);
+    state.focusHourHistory = focusHourHistory;
+    state.dailyInterruptions = parseInterruptions(dailyInterruptions);
+    state.completedPomodoros = todaySession
+      ? Math.max(0, Math.floor(Number(todaySession.completed_pomodoros) || 0))
+      : 0;
+    state.dailyDate = todayKey();
+    ensureTodayBucket();
+  }
+
+  function applyServerTodos(todos) {
+    state.todos = todos
+      .map((todo, index) => normalizeServerTodo(todo, index))
+      .filter(Boolean)
+      .sort((a, b) => a.position - b.position);
+    const activeTodo = state.todos.find((todo) => todo.id === state.activeTodoId);
+    if (!activeTodo || activeTodo.done) state.activeTodoId = null;
+    if (!state.todos.some((todo) => todo.id === state.currentPomodoroTodoId)) {
+      state.currentPomodoroTodoId = null;
+    }
+  }
+
+  async function syncTodoOrder() {
+    const result = await apiPost("/todos/reorder", state.todos.map((todo) => todo.id));
+    if (!result) {
+      showToast("待办顺序同步失败");
+      return false;
+    }
+    return true;
+  }
+
   function pruneHistory() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -187,6 +302,9 @@
 
   function ensureTodayBucket() {
     const key = todayKey();
+    if (state.dailyDate && state.dailyDate !== key) {
+      state.completedPomodoros = 0;
+    }
     state.dailyDate = key;
     if (!Number.isFinite(Number(state.focusHistory[key]))) {
       state.focusHistory[key] = 0;
@@ -215,6 +333,7 @@
 
   function addFocusOverlap(fromMs, toMs) {
     if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) return;
+    state.currentPomodoroFocusMs += toMs - fromMs;
     let cursor = fromMs;
     while (cursor < toMs) {
       const d = new Date(cursor);
@@ -243,9 +362,112 @@
     return "level-high";
   }
 
+  async function syncCurrentDay(force = false) {
+    if (!serverHydrated) return null;
+    const now = Date.now();
+    if (!force && now - lastServerSyncAt < 5000) return null;
+    if (serverSyncInFlight) {
+      if (!force) return serverSyncInFlight;
+      await serverSyncInFlight;
+      return syncCurrentDay(true);
+    }
+
+    ensureTodayBucket();
+    lastServerSyncAt = now;
+    serverSyncInFlight = apiPost("/pomodoros", buildSessionPayload(todayKey()))
+      .finally(() => {
+        serverSyncInFlight = null;
+      });
+    return serverSyncInFlight;
+  }
+
+  async function migrateLocalSessions() {
+    const dates = new Set([
+      ...Object.keys(state.focusHistory),
+      ...Object.keys(state.focusHourHistory),
+      ...Object.keys(state.dailyInterruptions)
+    ]);
+    const payloads = Array.from(dates)
+      .filter((date) => {
+        const payload = buildSessionPayload(date);
+        return payload.focus_ms > 0
+          || payload.completed_pomodoros > 0
+          || payload.interruptions > 0;
+      })
+      .map((date) => buildSessionPayload(date));
+
+    if (payloads.length) {
+      await Promise.all(payloads.map((payload) => apiPost("/pomodoros", payload)));
+    }
+  }
+
+  async function migrateLocalTodos() {
+    if (!state.todos.length) return;
+    await Promise.all(state.todos.map((todo, index) => apiPost("/todos", {
+      text: todo.text,
+      done: todo.done,
+      position: index
+    })));
+  }
+
+  async function hydrateFromServer() {
+    const [serverSessionsResult, serverTodosResult] = await Promise.all([
+      apiGet("/pomodoros?days=730"),
+      apiGet("/todos")
+    ]);
+    let serverSessions = serverSessionsResult;
+    let serverTodos = serverTodosResult;
+
+    if (Array.isArray(serverSessions)) {
+      if (!serverSessions.length) {
+        const hasLocalSessions = Array.from(new Set([
+          ...Object.keys(state.focusHistory),
+          ...Object.keys(state.focusHourHistory),
+          ...Object.keys(state.dailyInterruptions)
+        ])).some((date) => {
+          const payload = buildSessionPayload(date);
+          return payload.focus_ms > 0
+            || payload.completed_pomodoros > 0
+            || payload.interruptions > 0;
+        });
+        await migrateLocalSessions();
+        const migratedSessions = await apiGet("/pomodoros?days=730");
+        if (Array.isArray(migratedSessions) && (migratedSessions.length || !hasLocalSessions)) {
+          serverSessions = migratedSessions;
+        } else if (hasLocalSessions) {
+          serverSessions = null;
+        }
+      }
+      if (Array.isArray(serverSessions)) applyServerSessions(serverSessions);
+    }
+
+    if (Array.isArray(serverTodos)) {
+      if (!serverTodos.length) {
+        const hasLocalTodos = state.todos.length > 0;
+        await migrateLocalTodos();
+        const migratedTodos = await apiGet("/todos");
+        if (Array.isArray(migratedTodos) && (migratedTodos.length || !hasLocalTodos)) {
+          serverTodos = migratedTodos;
+        } else if (hasLocalTodos) {
+          serverTodos = null;
+        }
+      }
+      if (Array.isArray(serverTodos)) applyServerTodos(serverTodos);
+    }
+
+    serverHydrated = true;
+    if (!Array.isArray(serverSessions) && !Array.isArray(serverTodos)) {
+      showToast("服务器暂时不可用，当前使用本地缓存");
+    }
+    persist();
+    render();
+  }
+
   function persist() {
     pruneHistory();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, savedAt: Date.now() }));
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, savedAt: Date.now() }));
+  void syncCurrentDay();
   }
 
   function restore() {
@@ -269,9 +491,32 @@
           .map((t) => ({
             id: Number.isFinite(Number(t.id)) ? Number(t.id) : Date.now() + Math.random(),
             text: t.text.trim().slice(0, 80),
-            done: Boolean(t.done)
+            done: Boolean(t.done),
+            position: Number.isFinite(Number(t.position)) ? Number(t.position) : 0,
+            pomodoroCount: Math.max(0, Math.floor(Number(t.pomodoroCount) || 0)),
+            focusMs: Math.max(0, Math.floor(Number(t.focusMs) || 0))
           }))
         : [];
+      const savedActiveTodoId = saved.activeTodoId == null
+        ? NaN
+        : Number(saved.activeTodoId);
+      state.activeTodoId = Number.isFinite(savedActiveTodoId) ? savedActiveTodoId : null;
+      const savedCurrentPomodoroTodoId = saved.currentPomodoroTodoId == null
+        ? NaN
+        : Number(saved.currentPomodoroTodoId);
+      state.currentPomodoroTodoId = Number.isFinite(savedCurrentPomodoroTodoId)
+        ? savedCurrentPomodoroTodoId
+        : null;
+      state.currentPomodoroFocusMs = Math.max(
+        0,
+        Number(saved.currentPomodoroFocusMs) || 0
+      );
+      if (!state.todos.some((todo) => todo.id === state.activeTodoId && !todo.done)) {
+        state.activeTodoId = null;
+      }
+      if (!state.todos.some((todo) => todo.id === state.currentPomodoroTodoId)) {
+        state.currentPomodoroTodoId = null;
+      }
       state.dailyDate = typeof saved.dailyDate === "string" ? saved.dailyDate : todayKey();
       const savedMonth = Number(saved.selectedMonth);
       state.selectedMonth = Number.isInteger(savedMonth) && savedMonth >= 0 && savedMonth <= 11
@@ -303,13 +548,7 @@
       state.soundEnabled = saved.soundEnabled !== false;
       const allowedRingtones = ["classic", "digital", "soft", "urgent"];
       state.ringtone = allowedRingtones.includes(saved.ringtone) ? saved.ringtone : "classic";
-      if (saved.theme === "dark") {
-        state.theme = "dark";
-      } else if (saved.theme === "green") {
-        state.theme = "green";
-      } else {
-        state.theme = "blue";
-      }
+      state.theme = THEME_VALUES.includes(saved.theme) ? saved.theme : "blue";
       ensureTodayBucket();
 
       if (state.isRunning) {
@@ -333,8 +572,21 @@
   }
 
   function applyTheme() {
-    document.body.classList.toggle("theme-green", state.theme === "green");
-    document.body.classList.toggle("dark-theme", state.theme === "dark");
+    document.body.classList.remove(
+      "theme-green",
+      "dark-theme",
+      "theme-lavender",
+      "theme-sand",
+      "theme-mist",
+      "theme-midnight"
+    );
+    if (state.theme === "green") {
+      document.body.classList.add("theme-green");
+    } else if (state.theme === "dark") {
+      document.body.classList.add("dark-theme");
+    } else if (state.theme !== "blue") {
+      document.body.classList.add(`theme-${state.theme}`);
+    }
   }
 
   function heatLevel(ms, maxMs) {
@@ -426,6 +678,7 @@
     els.resumeBtn.disabled = state.isRunning || !paused;
 
     updateExtendUI();
+    renderCurrentTask();
     renderTodos();
     renderContributionGrid();
     renderDailyReview();
@@ -435,6 +688,60 @@
     }
    }
 
+  function getActiveTodo() {
+    return state.todos.find((todo) => todo.id === state.activeTodoId && !todo.done) || null;
+  }
+
+  function renderCurrentTask() {
+    if (!els.currentTaskName || !els.clearActiveTodoBtn) return;
+    const todo = getActiveTodo();
+    els.currentTaskName.textContent = todo ? todo.text : "未关联任务";
+    els.clearActiveTodoBtn.disabled = !todo;
+  }
+
+  function setActiveTodo(todoId) {
+    const todo = state.todos.find((item) => item.id === todoId);
+    if (!todo || todo.done) return;
+    if (
+      state.mode === "study"
+      && state.currentPomodoroFocusMs > 0
+      && state.currentPomodoroTodoId !== todoId
+    ) {
+      showToast("当前番茄已开始，请完成或重置后再切换任务");
+      return;
+    }
+    state.activeTodoId = todoId;
+    persist();
+    render();
+  }
+
+  function clearActiveTodo() {
+    if (state.mode === "study" && state.currentPomodoroFocusMs > 0) {
+      showToast("当前番茄已开始，请完成或重置后再取消关联");
+      return;
+    }
+    state.activeTodoId = null;
+    persist();
+    render();
+  }
+
+  async function recordTodoPomodoro(todoId, focusMs) {
+    if (!Number.isFinite(todoId) || focusMs <= 0) return;
+    const updated = await apiPost(`/todos/${todoId}/pomodoros`, {
+      focus_ms: Math.max(1, Math.floor(focusMs))
+    });
+    if (!updated) {
+      showToast("任务番茄记录失败，请检查网络连接");
+      return;
+    }
+    const todo = normalizeServerTodo(updated);
+    const index = state.todos.findIndex((item) => item.id === todo?.id);
+    if (!todo || index < 0) return;
+    state.todos[index] = todo;
+    persist();
+    render();
+  }
+
   function renderTodos() {
     if (!els.todoList) return;
     if (!state.todos.length) {
@@ -442,33 +749,51 @@
       return;
     }
     els.todoList.innerHTML = state.todos.map((todo) => {
+      const active = todo.id === state.activeTodoId;
       const safeText = todo.text
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
       return `
-        <li class="todo-item ${todo.done ? "done" : ""}" data-id="${todo.id}">
+        <li class="todo-item ${todo.done ? "done" : ""} ${active ? "active-task" : ""}" data-id="${todo.id}">
           <input type="checkbox" class="todo-check" ${todo.done ? "checked" : ""} />
           <span class="todo-drag-handle" draggable="true" title="拖拽排序">⋮⋮</span>
-          <span class="todo-text">${safeText}</span>
+          <span class="todo-main">
+            <span class="todo-text">${safeText}</span>
+            <span class="todo-stats">🍅 ${todo.pomodoroCount} · ${formatDuration(todo.focusMs)}</span>
+          </span>
+          <button class="todo-link ${active ? "active" : ""}" type="button" aria-pressed="${active}" ${todo.done ? "disabled" : ""}>${active ? "当前" : "关联"}</button>
           <button class="todo-del" type="button">删除</button>
         </li>
       `;
     }).join("");
   }
 
-  function addTodo() {
+  async function addTodo() {
     const text = (els.todoInput.value || "").trim();
     if (!text) {
       showToast("请输入代办内容");
       return;
     }
-    state.todos.unshift({
-      id: Date.now() + Math.floor(Math.random() * 1000),
+
+    const created = await apiPost("/todos", {
       text: text.slice(0, 80),
-      done: false
+      done: false,
+      position: 0
     });
+    if (!created) {
+      showToast("待办保存失败，请检查网络连接");
+      return;
+    }
+
+    const todo = normalizeServerTodo(created, 0);
+    if (!todo) {
+      showToast("待办保存结果无效");
+      return;
+    }
+    state.todos.unshift(todo);
     els.todoInput.value = "";
+    await syncTodoOrder();
     persist();
     renderTodos();
   }
@@ -697,6 +1022,7 @@
 
     if (!Number.isFinite(targetId)) {
       state.todos.push(moved);
+      void syncTodoOrder();
       persist();
       renderTodos();
       return;
@@ -709,6 +1035,7 @@
       if (!beforeTarget) toIndex += 1;
       state.todos.splice(toIndex, 0, moved);
     }
+    void syncTodoOrder();
     persist();
     renderTodos();
   }
@@ -758,6 +1085,10 @@
   function startTimer() {
     if (state.isRunning) return;
     ensureTodayBucket();
+    if (state.mode === "study" && state.currentPomodoroFocusMs <= 0) {
+      const todo = getActiveTodo();
+      state.currentPomodoroTodoId = todo ? todo.id : null;
+    }
     state.isRunning = true;
     lastTickAt = Date.now();
     state.endTime = Date.now() + state.remainingMs;
@@ -788,6 +1119,7 @@
     state.endTime = 0;
     lastTickAt = null;
     persist();
+    void syncCurrentDay(true);
   }
 
   function stopTimer(shouldReset = false) {
@@ -820,6 +1152,8 @@
     state.mode = "study";
     state.remainingMs = modeDuration("study");
     state.endTime = 0;
+    state.currentPomodoroTodoId = null;
+    state.currentPomodoroFocusMs = 0;
     persist();
     render();
   }
@@ -1019,8 +1353,14 @@
 
   function handlePhaseComplete() {
     const finishedMode = state.mode;
+    const completedTodoId = finishedMode === "study" ? state.currentPomodoroTodoId : null;
+    const completedFocusMs = finishedMode === "study"
+      ? Math.max(0, Math.floor(state.currentPomodoroFocusMs))
+      : 0;
     if (finishedMode === "study") {
       state.completedPomodoros += 1;
+      state.currentPomodoroTodoId = null;
+      state.currentPomodoroFocusMs = 0;
     }
 
     switchMode();
@@ -1031,11 +1371,105 @@
 
     notify(msg);
     persist();
+    void syncCurrentDay(true);
     render();
+
+    if (completedTodoId !== null && completedFocusMs > 0) {
+      void recordTodoPomodoro(completedTodoId, completedFocusMs);
+    }
 
     if (state.autoNext) {
       startTimer();
     }
+  }
+
+  function toggleFullscreen() {
+    const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+    if (!fullscreenElement) {
+      const requestFullscreen = document.documentElement.requestFullscreen
+        || document.documentElement.webkitRequestFullscreen
+        || document.documentElement.msRequestFullscreen;
+      if (requestFullscreen) {
+        Promise.resolve(requestFullscreen.call(document.documentElement)).catch(() => {
+          showToast("无法进入全屏，请检查浏览器权限");
+        });
+      }
+      return;
+    }
+
+    const exitFullscreen = document.exitFullscreen
+      || document.webkitExitFullscreen
+      || document.msExitFullscreen;
+    if (exitFullscreen) {
+      Promise.resolve(exitFullscreen.call(document)).catch(() => {});
+    }
+  }
+
+  function updateFullscreenButton() {
+    if (!els.fullscreenBtn) return;
+    const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+    els.fullscreenBtn.innerHTML = fullscreenElement ? "\u26F6 退出全屏" : "\u26F6 全屏";
+  }
+
+  function closeOpenModal() {
+    if (els.reviewModal && !els.reviewModal.classList.contains("hidden")) {
+      els.reviewModal.classList.add("hidden");
+      els.reviewModal.setAttribute("aria-hidden", "true");
+      return true;
+    }
+    if (els.settingsModal && !els.settingsModal.classList.contains("hidden")) {
+      els.settingsModal.classList.add("hidden");
+      els.settingsModal.setAttribute("aria-hidden", "true");
+      return true;
+    }
+    return false;
+  }
+
+  function isTypingTarget(target) {
+    if (!target) return false;
+    const tagName = target.tagName;
+    return tagName === "INPUT"
+      || tagName === "TEXTAREA"
+      || tagName === "SELECT"
+      || target.isContentEditable;
+  }
+
+  function toggleTimerFromShortcut() {
+    if (state.isRunning) {
+      pauseTimer();
+      return;
+    }
+    if (state.remainingMs <= 0) {
+      state.remainingMs = modeDuration(state.mode);
+    }
+    startTimer();
+  }
+
+  function bindKeyboardShortcuts() {
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (closeOpenModal()) return;
+        toggleFullscreen();
+        return;
+      }
+
+      if (isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        toggleTimerFromShortcut();
+      } else if (e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        toggleFullscreen();
+      } else if (e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        resetAll();
+      } else if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        applyExtension(5);
+      }
+    });
   }
 
   function bindEvents() {
@@ -1091,6 +1525,9 @@
     });
 
     els.addTodoBtn.addEventListener("click", addTodo);
+    if (els.clearActiveTodoBtn) {
+      els.clearActiveTodoBtn.addEventListener("click", clearActiveTodo);
+    }
 
     els.todoInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
@@ -1099,38 +1536,74 @@
       }
     });
 
-    els.clearDoneBtn.addEventListener("click", () => {
-      const before = state.todos.length;
-      state.todos = state.todos.filter((t) => !t.done);
-      if (state.todos.length !== before) {
-        persist();
-        renderTodos();
+    els.clearDoneBtn.addEventListener("click", async () => {
+      const doneTodos = state.todos.filter((todo) => todo.done);
+      if (!doneTodos.length) return;
+
+      const results = await Promise.all(doneTodos.map((todo) => apiDelete("/todos/" + todo.id)));
+      if (results.some((success) => !success)) {
+        showToast("部分已完成待办删除失败");
       }
+      const failedIds = new Set(doneTodos
+        .filter((todo, index) => !results[index])
+        .map((todo) => todo.id));
+      state.todos = state.todos.filter((todo) => !todo.done || failedIds.has(todo.id));
+      if (!state.todos.some((todo) => todo.id === state.activeTodoId)) {
+        state.activeTodoId = null;
+      }
+      if (!state.todos.some((todo) => todo.id === state.currentPomodoroTodoId)) {
+        state.currentPomodoroTodoId = null;
+      }
+      persist();
+      render();
     });
 
-    els.todoList.addEventListener("click", (e) => {
+    els.todoList.addEventListener("click", async (e) => {
       const item = e.target.closest(".todo-item");
       if (!item) return;
       const id = Number(item.dataset.id);
       if (!Number.isFinite(id)) return;
 
+      if (e.target.classList.contains("todo-link")) {
+        setActiveTodo(id);
+        return;
+      }
+
       if (e.target.classList.contains("todo-del")) {
+        const deleted = await apiDelete("/todos/" + id);
+        if (!deleted) {
+          showToast("待办删除失败，请检查网络连接");
+          return;
+        }
         state.todos = state.todos.filter((t) => t.id !== id);
+        if (state.activeTodoId === id) state.activeTodoId = null;
+        if (state.currentPomodoroTodoId === id) state.currentPomodoroTodoId = null;
         persist();
-        renderTodos();
+        render();
       }
     });
 
-    els.todoList.addEventListener("change", (e) => {
+    els.todoList.addEventListener("change", async (e) => {
       if (!e.target.classList.contains("todo-check")) return;
       const item = e.target.closest(".todo-item");
       if (!item) return;
       const id = Number(item.dataset.id);
       const todo = state.todos.find((t) => t.id === id);
       if (!todo) return;
-      todo.done = e.target.checked;
+      const updated = await apiPatch("/todos/" + id + "/toggle");
+      if (!updated) {
+        showToast("待办更新失败，请检查网络连接");
+        renderTodos();
+        return;
+      }
+      const normalized = normalizeServerTodo(updated, todo.position);
+      if (normalized) Object.assign(todo, normalized);
+      if (todo.done) {
+        if (state.activeTodoId === id) state.activeTodoId = null;
+        if (state.currentPomodoroTodoId === id) state.currentPomodoroTodoId = null;
+      }
       persist();
-      renderTodos();
+      render();
     });
 
     els.todoList.addEventListener("dragstart", (e) => {
@@ -1185,7 +1658,7 @@
 
     els.themeSelect.addEventListener("change", (e) => {
       const value = e.target.value;
-      state.theme = value === "green" || value === "dark" ? value : "blue";
+      state.theme = THEME_VALUES.includes(value) ? value : "blue";
       applyTheme();
       persist();
       render();
@@ -1253,13 +1726,6 @@
       }
     });
 
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && !els.reviewModal.classList.contains("hidden")) {
-        els.reviewModal.classList.add("hidden");
-        els.reviewModal.setAttribute("aria-hidden", "true");
-      }
-    });
-
     window.addEventListener("pagehide", pauseForPageExit);
     window.addEventListener("beforeunload", pauseForPageExit);
   }
@@ -1278,34 +1744,26 @@
     bindEvents();
     render();
 
-    if (state.isRunning) {
-      resumeRunningTimer();
-    }
+    void hydrateFromServer()
+      .catch(() => {
+        serverHydrated = true;
+        showToast("服务器同步失败，当前使用本地缓存");
+      })
+      .finally(() => {
+        if (state.isRunning) {
+          resumeRunningTimer();
+        }
+        render();
+      });
 
-    // 全屏模式按钮与快捷键
-    const fullscreenBtn = document.getElementById("fullscreenBtn");
-    function toggleFullscreen() {
-      var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-      if (!fsEl) {
-        var el = document.documentElement;
-        (el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen).call(el);
-      } else {
-        (document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen).call(document);
-      }
+    // 全屏按钮与键盘快捷键
+    if (els.fullscreenBtn) {
+      els.fullscreenBtn.addEventListener("click", toggleFullscreen);
     }
-    function updateFullscreenBtn() {
-      var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-      fullscreenBtn.innerHTML = fsEl ? "\u26F6 退出全屏" : "\u26F6 全屏";
-    }
-    fullscreenBtn.addEventListener("click", toggleFullscreen);
-    document.addEventListener("fullscreenchange", updateFullscreenBtn);
-    document.addEventListener("webkitfullscreenchange", updateFullscreenBtn);
-    document.addEventListener("keydown", function(e) {
-      if (e.key !== "Escape") return;
-      if (!els.reviewModal.classList.contains("hidden")) return;
-      var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-      if (!fsEl) toggleFullscreen();
-    });
+    document.addEventListener("fullscreenchange", updateFullscreenButton);
+    document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
+    updateFullscreenButton();
+    bindKeyboardShortcuts();
     // 设置弹窗
     els.openSettingsBtn.addEventListener("click", function() {
       els.studyMinutesInput.value = String(state.studyMinutes);
@@ -1335,16 +1793,12 @@
       stopTimer(false);
       state.remainingMs = modeDuration(state.mode);
       state.endTime = 0;
+      state.currentPomodoroTodoId = null;
+      state.currentPomodoroFocusMs = 0;
       els.settingsModal.classList.add("hidden");
       els.settingsModal.setAttribute("aria-hidden", "true");
       persist();
       render();
-    });
-    document.addEventListener("keydown", function settingsEsc(e) {
-      if (e.key === "Escape" && !els.settingsModal.classList.contains("hidden")) {
-        els.settingsModal.classList.add("hidden");
-        els.settingsModal.setAttribute("aria-hidden", "true");
-      }
     });
     // 注册 Service Worker（PWA 离线支持）
     if ("serviceWorker" in navigator) {

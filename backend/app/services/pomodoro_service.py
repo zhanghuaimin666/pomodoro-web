@@ -7,6 +7,12 @@ from app.models.pomodoro import PomodoroSession, Todo
 from app.schemas.pomodoro import PomodoroSessionCreate, TodoCreate
 
 
+def normalize_focus_hours(value) -> list[int]:
+    if not isinstance(value, list) or len(value) != 24:
+        return [0] * 24
+    return [max(0, int(item or 0)) for item in value]
+
+
 # --- PomodoroSession ---
 
 def get_or_create_session(db: Session, date: datetime.date) -> PomodoroSession:
@@ -24,6 +30,7 @@ def upsert_session(db: Session, data: PomodoroSessionCreate) -> PomodoroSession:
     session.focus_ms = data.focus_ms
     session.completed_pomodoros = data.completed_pomodoros
     session.interruptions = data.interruptions
+    session.focus_hours = list(data.focus_hours)
     db.commit()
     db.refresh(session)
     return session
@@ -31,12 +38,15 @@ def upsert_session(db: Session, data: PomodoroSessionCreate) -> PomodoroSession:
 
 def list_sessions(db: Session, days: int = 30):
     since = datetime.date.today() - datetime.timedelta(days=days)
-    return (
+    rows = (
         db.query(PomodoroSession)
         .filter(PomodoroSession.date >= since)
         .order_by(PomodoroSession.date.desc())
         .all()
     )
+    for row in rows:
+        row.focus_hours = normalize_focus_hours(row.focus_hours)
+    return rows
 
 
 def get_stats(db: Session, days: int = 7):
@@ -47,6 +57,7 @@ def get_stats(db: Session, days: int = 7):
             PomodoroSession.focus_ms,
             PomodoroSession.completed_pomodoros,
             PomodoroSession.interruptions,
+            PomodoroSession.focus_hours,
         )
         .filter(PomodoroSession.date >= since)
         .order_by(PomodoroSession.date.asc())
@@ -61,6 +72,7 @@ def get_stats(db: Session, days: int = 7):
             "focus_ms": r.focus_ms,
             "pomodoros": r.completed_pomodoros,
             "interruptions": r.interruptions,
+            "focus_hours": normalize_focus_hours(r.focus_hours),
         }
         for r in rows
     ]
@@ -100,6 +112,16 @@ def toggle_todo(db: Session, todo_id: int) -> Todo | None:
     todo = db.query(Todo).filter(Todo.id == todo_id).first()
     if todo:
         todo.done = not todo.done
+        db.commit()
+        db.refresh(todo)
+    return todo
+
+
+def add_todo_pomodoro(db: Session, todo_id: int, focus_ms: int) -> Todo | None:
+    todo = db.query(Todo).filter(Todo.id == todo_id).first()
+    if todo:
+        todo.pomodoro_count = (todo.pomodoro_count or 0) + 1
+        todo.focus_ms = (todo.focus_ms or 0) + focus_ms
         db.commit()
         db.refresh(todo)
     return todo

@@ -10,6 +10,7 @@ from app.schemas.pomodoro import (
     StatsOut,
     TodoCreate,
     TodoOut,
+    TodoPomodoroCreate,
 )
 from app.services import pomodoro_service as svc
 
@@ -55,6 +56,16 @@ def create_todo(data: TodoCreate, db: Session = Depends(get_db)):
 @api_router.patch("/todos/{todo_id}/toggle", response_model=TodoOut)
 def toggle_todo(todo_id: int, db: Session = Depends(get_db)):
     todo = svc.toggle_todo(db, todo_id)
+    if not todo:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    return todo
+
+
+@api_router.post("/todos/{todo_id}/pomodoros", response_model=TodoOut)
+def add_todo_pomodoro(
+    todo_id: int, data: TodoPomodoroCreate, db: Session = Depends(get_db)
+):
+    todo = svc.add_todo_pomodoro(db, todo_id, data.focus_ms)
     if not todo:
         raise HTTPException(status_code=404, detail="Todo not found")
     return todo

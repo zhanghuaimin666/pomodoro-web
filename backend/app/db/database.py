@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
@@ -9,12 +9,30 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def init_db():
-    """创建所有表（仅用于首次启动）"""
     Base.metadata.create_all(bind=engine)
+    # create_all does not add columns to an existing table.
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE pomodoro_sessions "
+                "ADD COLUMN IF NOT EXISTS focus_hours JSON NOT NULL DEFAULT '[]'"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE todos "
+                "ADD COLUMN IF NOT EXISTS pomodoro_count INTEGER NOT NULL DEFAULT 0"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE todos "
+                "ADD COLUMN IF NOT EXISTS focus_ms INTEGER NOT NULL DEFAULT 0"
+            )
+        )
 
 
 def get_db():
-    """FastAPI 依赖注入 — 获取数据库会话"""
     db = SessionLocal()
     try:
         yield db
