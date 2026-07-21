@@ -1,4 +1,4 @@
-﻿(() => {
+(() => {
   const STUDY_MS = 35 * 60 * 1000;
   const BREAK_MS = 5 * 60 * 1000;
   const STORAGE_KEY = "pomodoro-35-5-state-v1";
@@ -8,10 +8,6 @@
     break: { presets: [2, 5, 10], maxCustom: 15, label: "休息" }
   };
   const THEME_VALUES = ["blue", "green", "lavender", "sand", "mist", "midnight", "dark"];
-
- catch { return null; }
-} catch { return false; }
-}
 
 const els = {
     modeLabel: document.getElementById("modeLabel"),
@@ -566,7 +562,9 @@ const els = {
       id: Date.now() + Math.random(),
       text: text.slice(0, 80),
       done: false,
-      position: 0
+      position: 0,
+      pomodoroCount: 0,
+      focusMs: 0
     };
     state.todos.unshift(newTodo);
     els.todoInput.value = "";
