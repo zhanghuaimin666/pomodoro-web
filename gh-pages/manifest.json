@@ -1,0 +1,19 @@
+﻿{
+  "name": "番茄钟 - 35/5 专注定时器",
+  "short_name": "番茄钟",
+  "description": "35分钟学习 + 5分钟休息 番茄工作法定时器",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eef5ff",
+  "theme_color": "#1b74ff",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+

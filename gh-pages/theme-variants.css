@@ -1,0 +1,80 @@
+/* Low-stimulation theme palettes. Layout and interaction remain unchanged. */
+body.theme-lavender {
+  --bg1: #f6f3fb;
+  --bg2: #e8e0f6;
+  --card: #fffdfb;
+  --text: #2e2940;
+  --muted: #6f6780;
+  --accent: #866bc5;
+  --accent-strong: #6c52a8;
+  --ok: #5b9678;
+  --daily-low: #5b9678;
+  --daily-mid: #b7864c;
+  --daily-high: #a85e68;
+  --lv-0: #ede9f5;
+  --lv-1: #ddd1f0;
+  --lv-2: #c2abe4;
+  --lv-3: #a487d4;
+  --lv-4: #8568c0;
+  --calendar-day-text: #312846;
+}
+
+body.theme-sand {
+  --bg1: #fbf8f1;
+  --bg2: #f1e6d2;
+  --card: #fffdf8;
+  --text: #403428;
+  --muted: #786957;
+  --accent: #b47a45;
+  --accent-strong: #8e5c30;
+  --ok: #5d9572;
+  --daily-low: #5d9572;
+  --daily-mid: #b47a45;
+  --daily-high: #aa5f54;
+  --lv-0: #f0e9dc;
+  --lv-1: #e8d3b6;
+  --lv-2: #d9b58a;
+  --lv-3: #c79764;
+  --lv-4: #ad7544;
+  --calendar-day-text: #463728;
+}
+
+body.theme-mist {
+  --bg1: #f1f8f8;
+  --bg2: #dceeee;
+  --card: #fbffff;
+  --text: #203c42;
+  --muted: #5e777b;
+  --accent: #3d9296;
+  --accent-strong: #2e7075;
+  --ok: #4d9171;
+  --daily-low: #4d9171;
+  --daily-mid: #ad8752;
+  --daily-high: #a75e5e;
+  --lv-0: #e6f0f0;
+  --lv-1: #c6e2e1;
+  --lv-2: #98cccb;
+  --lv-3: #69b2b3;
+  --lv-4: #3c9296;
+  --calendar-day-text: #23464b;
+}
+
+body.theme-midnight {
+  --bg1: #121a2a;
+  --bg2: #202d46;
+  --card: #1b2639;
+  --text: #e8eefb;
+  --muted: #a9b7cf;
+  --accent: #9b8cff;
+  --accent-strong: #b5aaff;
+  --ok: #62b78a;
+  --daily-low: #73d19c;
+  --daily-mid: #e9bd68;
+  --daily-high: #f08a8a;
+  --lv-0: #2b3547;
+  --lv-1: #3a4770;
+  --lv-2: #52629a;
+  --lv-3: #6f7fd0;
+  --lv-4: #9288f0;
+  --calendar-day-text: #e8eefb;
+}

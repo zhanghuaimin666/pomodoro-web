@@ -1,0 +1,201 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="manifest" href="manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="番茄钟" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="theme-color" content="#1b74ff" />
+  <title>番茄钟 35/5</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="task-link.css" />
+  <link rel="stylesheet" href="theme-variants.css" />
+</head>
+<body>
+  <main class="app">
+    <h1>番茄钟</h1>
+    <p class="subtitle" id="subtitleDisplay">35分钟学习 + 5分钟休息</p>
+
+    <div class="content-grid">
+      <section class="card calendar-card">
+        <div class="calendar-header">
+          <div id="calendarYear" class="calendar-year"></div>
+          <div class="calendar-controls">
+            <label class="month-switch">
+              <span>月份</span>
+              <select id="monthSelect"></select>
+            </label>
+            <label class="view-switch">
+              <span>视图</span>
+              <select id="viewModeSelect">
+                <option value="detailed">详细</option>
+                <option value="compact">简洁</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="calendar-title">月度专注热力图</div>
+        <div class="calendar-subtitle">每日专注越久，绿色越鲜艳</div>
+        <div class="weekday-row">
+          <span>日</span>
+          <span>一</span>
+          <span>二</span>
+          <span>三</span>
+          <span>四</span>
+          <span>五</span>
+          <span>六</span>
+        </div>
+        <div id="contributionGrid" class="contribution-grid" aria-label="focus-contributions"></div>
+        <div class="legend">
+          <span>少</span>
+          <div class="legend-cells">
+            <i class="cell lv-0"></i>
+            <i class="cell lv-1"></i>
+            <i class="cell lv-2"></i>
+            <i class="cell lv-3"></i>
+            <i class="cell lv-4"></i>
+          </div>
+          <span>多</span>
+        </div>
+      </section>
+
+      <section class="card timer-card">
+        <div class="mode" id="modeLabel">学习模式</div>
+        <div class="time" id="timeDisplay">35:00</div>
+        <div class="meta">已完成番茄数: <span id="pomodoroCount">0</span></div>
+        <div class="daily">今日专注时长: <span id="dailyFocus" class="daily-time level-low">00:00:00</span></div>
+
+        <div class="current-task">
+          <div class="current-task-info">
+            <span class="current-task-label">当前任务</span>
+            <strong id="currentTaskName">未关联任务</strong>
+          </div>
+          <button id="clearActiveTodoBtn" class="secondary-btn" type="button" disabled>取消关联</button>
+        </div>
+
+        <div class="controls">
+          <button id="startBtn">开始</button>
+          <button id="pauseBtn" disabled>暂停</button>
+          <button id="resumeBtn" disabled>继续</button>
+          <button id="resetBtn">重置</button>
+        </div>
+
+        <div class="extend-box">
+          <button type="button" class="extend-trigger">延长当前阶段</button>
+          <div class="extend-details">
+            <div class="extend-details-inner">
+              <div class="quick-extend">
+                <button class="secondary-btn quick-extend-btn" type="button" data-minutes="2">+2m</button>
+                <button class="secondary-btn quick-extend-btn" type="button" data-minutes="5">+5m</button>
+                <button class="secondary-btn quick-extend-btn" type="button" data-minutes="10">+10m</button>
+              </div>
+              <div class="extend-controls">
+                <select id="extendPresetSelect"></select>
+                <input id="extendCustomMinutes" type="number" min="1" step="1" placeholder="自定义分钟" />
+                <button id="applyExtendBtn" class="secondary-btn" type="button">延长</button>
+              </div>
+              <div id="extendHint" class="extend-hint"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="toggles">
+          <label><input type="checkbox" id="autoNext" checked /> 自动进入下一阶段</label>
+          <label><input type="checkbox" id="soundEnabled" checked /> 声音提醒</label>
+          <label class="theme-switch">
+            <span>铃声</span>
+            <select id="ringtoneSelect">
+              <option value="classic">经典</option>
+              <option value="digital">数字</option>
+              <option value="soft">柔和</option>
+              <option value="urgent">紧急</option>
+            </select>
+          </label>
+          <button id="previewSoundBtn" class="secondary-btn" type="button">预览铃声（5秒）</button>
+          <label class="theme-switch">
+            <span>主题</span>
+            <select id="themeSelect">
+              <option value="blue">蓝色</option>
+              <option value="green">绿色</option>
+              <option value="lavender">薰衣草</option>
+              <option value="sand">暖沙</option>
+              <option value="mist">薄雾青</option>
+              <option value="midnight">午夜蓝</option>
+              <option value="dark">暗色</option>
+            </select>
+          </label>
+        </div>
+
+        <button id="notifyBtn" class="notify">开启桌面通知</button>
+       <button id="openReviewModalBtn" class="secondary-btn review-btn" type="button">数据分析</button>
+        <button id="openSettingsBtn" class="secondary-btn" type="button">⚙ 设置</button>
+      </section>
+
+      <section class="card todo-card">
+        <div class="todo-header">
+          <div class="todo-title">代办清单</div>
+          <button id="clearDoneBtn" class="secondary-btn" type="button">清除已完成</button>
+        </div>
+        <div class="todo-input-row">
+          <input id="todoInput" type="text" maxlength="80" placeholder="输入代办事项..." />
+          <button id="addTodoBtn" type="button">添加</button>
+        </div>
+        <ul id="todoList" class="todo-list"></ul>
+      </section>
+   </div>
+
+    <button id="fullscreenBtn" class="fullscreen-btn" title="全屏模式 (Esc / F)">⛶ 全屏</button>
+
+ </main>
+
+  <div id="reviewModal" class="review-modal hidden" aria-hidden="true">
+    <div class="review-modal-panel">
+      <div class="review-header">
+        <div class="review-title">数据分析</div>
+        <button id="closeReviewModalBtn" class="secondary-btn" type="button">关闭</button>
+      </div>
+      <div class="review-range">
+        <button id="reviewRange24Btn" class="range-btn active" type="button">过去24小时</button>
+        <button id="reviewRange7Btn" class="range-btn" type="button">过去7天</button>
+      </div>
+      <div id="modalReviewDate" class="review-date"></div>
+      <div id="modalReviewSubtitle" class="review-subtitle">专注时长分布（柱状图）</div>
+      <canvas id="modalHourlyChart" class="hourly-chart" width="760" height="240" aria-label="modal-focus-hourly-chart"></canvas>
+      <div class="review-meta">
+        <span>今日中断次数: <strong id="modalInterruptCount">0</strong></span>
+        <span>总专注时长: <strong id="modalReviewTotalFocus">00:00:00</strong></span>
+      </div>
+      <div class="review-advice-title">自动复盘建议</div>
+      <ul id="modalReviewAdvice" class="review-advice"></ul>
+    </div>
+ </div>
+
+  <div id="settingsModal" class="review-modal hidden" aria-hidden="true">
+    <div class="review-modal-panel settings-panel">
+      <div class="review-header">
+        <div class="review-title">设置</div>
+        <button id="closeSettingsBtn" class="secondary-btn" type="button">关闭</button>
+      </div>
+      <div class="settings-body">
+        <label class="settings-row">
+          <span>学习时长</span>
+          <input id="studyMinutesInput" type="number" min="1" max="180" step="1" value="35" />
+          <span class="settings-unit">分钟</span>
+        </label>
+        <label class="settings-row">
+          <span>休息时长</span>
+          <input id="breakMinutesInput" type="number" min="1" max="60" step="1" value="5" />
+          <span class="settings-unit">分钟</span>
+        </label>
+        <p class="settings-hint">修改后会自动重置计时器</p>
+        <button id="saveSettingsBtn" class="notify" type="button">保存设置</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="timer.js"></script>
+</body>
+</html>
+

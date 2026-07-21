@@ -1,0 +1,76 @@
+.current-task {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #cdd9ef;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.current-task-info {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.current-task-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+#currentTaskName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.current-task .secondary-btn {
+  flex: 0 0 auto;
+}
+
+.todo-item {
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+}
+
+.todo-item.active-task {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.todo-main {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.todo-stats {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.todo-link {
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  padding: 5px 8px;
+  font-size: 0.8rem;
+}
+
+.todo-link:hover,
+.todo-link.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+@media (max-width: 520px) {
+  .todo-item {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+  }
+
+  .todo-del {
+    grid-column: 4;
+  }
+}
